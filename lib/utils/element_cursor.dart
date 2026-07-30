@@ -9,6 +9,7 @@ class ElementCursor {
   final List<Object> _stack = [];
   final List<Element> _targetStack = [];
   late Element _target;
+  int _consumed = 0;
 
   ElementCursor({required Element root})
     : _root = root.clone(true),
@@ -18,10 +19,19 @@ class ElementCursor {
     _target = _buffer;
   }
 
+  Element get buffer => _buffer;
+
+  double get progress {
+    final total = _consumed + _stack.length;
+    if (total == 0) return 1.0;
+    return _consumed / total;
+  }
+
   Element? addNext() {
     if (_stack.isEmpty) return null;
 
     final node = _stack.removeLast();
+    _consumed++;
 
     switch (node) {
       case _PopMarker():

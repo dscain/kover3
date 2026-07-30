@@ -1,4 +1,7 @@
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:html/dom.dart';
@@ -12,10 +15,14 @@ import 'package:kover/utils/extensions/string.dart';
 import 'package:kover/utils/html_constants.dart';
 import 'package:kover/utils/logging.dart';
 import 'package:kover/utils/element_cursor.dart';
+import 'package:kover/utils/headless_measure_pipeline.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'epub_reader.freezed.dart';
 part 'epub_reader.g.dart';
+
+typedef EpubMeasureWidgetBuilder =
+    Widget Function(String html, Map<String, Map<String, String>> styles);
 
 enum EpubReflowStatus {
   measuring,
@@ -28,22 +35,25 @@ sealed class EpubReflowState with _$EpubReflowState {
 
   const factory EpubReflowState({
     required PageContent page,
-    @Default(null) DocumentFragment? buffer,
     @Default(EpubReflowStatus.measuring) EpubReflowStatus status,
     @Default(null) String? scrollId,
     @Default(null) int? resumeSubpage,
     @Default([]) List<DocumentFragment> subpages,
+    @Default(0.0) double progress,
   }) = _EpubReflowState;
 }
 
 @riverpod
 class EpubReflow extends _$EpubReflow {
-  bool _processingRender = false;
+  final _pipeline = HeadlessMeasurePipeline();
 
   // The scroll-id to seek to on resume. Set once from the DB on the very
   // first build and cleared as soon as we reach a Display state, so that
   // subsequent page-turn rebuilds never re-trigger a seek.
   String? _resumeScrollId;
+  bool _measuring = false;
+  late EpubMeasureWidgetBuilder _measureBuilder;
+  late Duration _maxChunkDuration;
   late ElementCursor _cursor;
 
   @override
@@ -52,6 +62,8 @@ class EpubReflow extends _$EpubReflow {
     required int chapterId,
     required int page,
   }) async {
+    ref.onDispose(_pipeline.dispose);
+
     // force rerender on settings change
     ref.listen(epubReaderSettingsProvider(seriesId: seriesId), (prev, next) {
       next.whenData((next) {
@@ -103,90 +115,160 @@ class EpubReflow extends _$EpubReflow {
     );
   }
 
-  Future<void> addElement({bool force = false}) async {
-    final current = await future;
-    if (!force && (_processingRender || current.status == .done)) return;
+  /// Runs the reflow loop synchronously against the headless
+  /// [HeadlessMeasurePipeline] until the cursor is exhausted. Safe to call
+  /// repeatedly; concurrent calls are coalesced and viewport changes are
+  /// picked up by a running loop.
+  Future<void> startReflow({
+    required Size viewport,
+    required double devicePixelRatio,
+    required EpubMeasureWidgetBuilder measureBuilder,
+    required double refreshRate,
+  }) async {
+    if (viewport.isEmpty) return;
+
+    _measureBuilder = measureBuilder;
+    _maxChunkDuration = Duration(milliseconds: (1000 / refreshRate).round());
+
+    if (_measuring || !state.hasValue) return;
+    _measuring = true;
+    _pipeline.attach(size: viewport, devicePixelRatio: devicePixelRatio);
 
     try {
-      _processingRender = true;
+      // Ensure the measure widget has its data on first build; the
+      // synchronous loop would otherwise outrun the async resolution.
+      await ref.read(epubReaderSettingsProvider(seriesId: seriesId).future);
 
-      final next = _cursor.addNext();
+      if (!ref.mounted) return;
+      await ref.read(customCssProvider(seriesId: seriesId).future);
 
-      if (next == null) {
-        final newSubpages = [
-          ...current.subpages,
-          ?current.buffer,
-        ].where((fragment) => fragment.hasVisibleNodes).toList();
+      final stopwatch = Stopwatch()..start();
 
-        if (newSubpages.isEmpty) {
-          log.debug('no content to render, add empty page');
-          newSubpages.add(DocumentFragment());
+      while (state.value?.status != .done) {
+        final maxHeight = _pipeline.viewportSize?.height ?? viewport.height;
+        final bufferHtml = _cursor.buffer.outerHtml;
+
+        if (!_pipeline.isAttached) {
+          log.warning(
+            'pipeline detached during reflow',
+            attributes: {
+              'page': page,
+              'bufferLength': bufferHtml.length,
+            },
+          );
+          return;
         }
 
-        var newState = current.copyWith(
-          subpages: newSubpages,
-          status: .done,
-        );
+        if (!ref.mounted) return;
 
-        if (current.buffer != null) {
-          newState = await _checkResumePoint(
-            current: newState,
-            fragment: current.buffer!,
-            subpage: newSubpages.length - 1,
+        final current = await future;
+        final height = _pipeline
+            .measure(_measureBuilder(bufferHtml, current.page.styles))
+            .height;
+
+        // A zero-height measure for non-empty content means the measure
+        // pass is silently broken; never treat it as "fits".
+        if (height == 0 &&
+            _cursor.buffer.hasVisibleNodes &&
+            bufferHtml.isNotEmpty) {
+          throw StateError(
+            'measure returned zero height for non-empty buffer',
           );
         }
 
-        state = AsyncData(newState);
-        return;
-      }
+        if (height <= maxHeight) {
+          await _addElement();
+        } else {
+          await _handleOverflow();
+        }
 
-      state = AsyncData(
-        current.copyWith(
-          buffer: DocumentFragment()..append(next),
-        ),
+        // Yield to the event loop periodically to keep the UI responsive.
+        if (stopwatch.elapsed >= _maxChunkDuration) {
+          stopwatch.reset();
+          if (SchedulerBinding.instance.hasScheduledFrame) {
+            await SchedulerBinding.instance.endOfFrame;
+          } else {
+            await Future<void>.delayed(0.ms);
+          }
+        }
+      }
+    } on MeasureTreeBuildException catch (e, stacktrace) {
+      log.error(
+        'measure widget failed to build',
+        error: e,
+        stacktrace: stacktrace,
       );
+      if (ref.mounted) {
+        state = AsyncError(e, stacktrace);
+      }
     } finally {
-      _processingRender = false;
+      _measuring = false;
     }
   }
 
-  Future<void> overflow() async {
-    if (_processingRender) return;
-    _processingRender = true;
-    try {
-      _processingRender = true;
+  Future<void> _addElement() async {
+    final current = state.value;
+    if (current == null || current.status == .done) return;
 
-      final current = await future;
+    final next = _cursor.addNext();
+    if (next != null) return;
 
-      if (current.status == .done) return;
+    final tail = DocumentFragment()..append(_cursor.buffer.clone(true));
+    final newSubpages = [
+      ...current.subpages,
+      tail,
+    ].where((fragment) => fragment.hasVisibleNodes).toList();
 
-      if (_cursor.splitChild()) {
-        await addElement(force: true);
-        return;
-      }
-
-      final newSubpageNode = _cursor.commitSplit();
-
-      final fragment = DocumentFragment()..append(newSubpageNode);
-      final newSubpages = [
-        ...current.subpages,
-        if (fragment.hasVisibleNodes) fragment,
-      ];
-      var newState = current.copyWith(
-        subpages: newSubpages,
-        buffer: null,
-      );
-
-      newState = await _checkResumePoint(
-        current: newState,
-        fragment: fragment,
-        subpage: newSubpages.length - 1,
-      );
-
-      state = AsyncData(newState);
-    } finally {
-      _processingRender = false;
+    if (newSubpages.isEmpty) {
+      log.debug('no content to render, add empty page');
+      newSubpages.add(DocumentFragment());
     }
+
+    var newState = current.copyWith(
+      subpages: newSubpages,
+      status: .done,
+      progress: 1.0,
+    );
+
+    newState = await _checkResumePoint(
+      current: newState,
+      fragment: tail,
+      subpage: newSubpages.length - 1,
+    );
+
+    state = AsyncData(newState);
+  }
+
+  Future<void> _handleOverflow() async {
+    final current = state.value;
+    if (current == null || current.status == .done) return;
+
+    if (_cursor.splitChild()) return;
+
+    final newSubpageNode = _cursor.commitSplit();
+
+    final fragment = DocumentFragment()..append(newSubpageNode);
+    final newSubpages = [
+      ...current.subpages,
+      if (fragment.hasVisibleNodes) fragment,
+    ];
+
+    final cursorProgress = _cursor.progress;
+
+    var newState = current.copyWith(
+      subpages: newSubpages,
+      progress: cursorProgress > current.progress
+          ? cursorProgress
+          : current.progress,
+    );
+
+    newState = await _checkResumePoint(
+      current: newState,
+      fragment: fragment,
+      subpage: newSubpages.length - 1,
+    );
+
+    state = AsyncData(newState);
   }
 
   Future<EpubReflowState> _checkResumePoint({
