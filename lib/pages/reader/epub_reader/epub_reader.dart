@@ -81,14 +81,6 @@ class EpubReader extends HookConsumerWidget {
                   initialPage: navState.page,
                 );
 
-                final reflowProgress = ref.watch(
-                  epubReflowProvider(
-                    seriesId: seriesId,
-                    chapterId: chapterId,
-                    page: navState.page,
-                  ).select((state) => state.value?.progress ?? 0.0),
-                );
-
                 ref.listen(nav, (
                   previous,
                   next,
@@ -149,11 +141,9 @@ class EpubReader extends HookConsumerWidget {
                       ),
                     ),
                     if (!navState.ready)
-                      Positioned.fill(
+                      const Positioned.fill(
                         child: Center(
-                          child: CircularProgressIndicator(
-                            value: reflowProgress,
-                          ),
+                          child: CircularProgressIndicator(),
                         ),
                       ),
                   ],
@@ -254,7 +244,11 @@ class _Page extends HookConsumerWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (reflow.value?.status != .done) {
+        final isVisiblePage = navigation.value?.page == page;
+        final visibleReady = navigation.value?.ready ?? false;
+        final shouldStart = isVisiblePage || visibleReady;
+
+        if (shouldStart && reflow.value?.status != .done) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!context.mounted) return;
             ref
@@ -357,10 +351,8 @@ class _Page extends HookConsumerWidget {
                     },
                     itemBuilder: (context, index) {
                       if (index >= reflowState.subpages.length) {
-                        return Center(
-                          child: CircularProgressIndicator(
-                            value: reflowState.progress,
-                          ),
+                        return const Center(
+                          child: CircularProgressIndicator(),
                         );
                       }
 

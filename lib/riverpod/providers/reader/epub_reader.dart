@@ -14,7 +14,7 @@ import 'package:kover/utils/extensions/document_fragment.dart';
 import 'package:kover/utils/extensions/string.dart';
 import 'package:kover/utils/html_constants.dart';
 import 'package:kover/utils/logging.dart';
-import 'package:kover/utils/element_cursor.dart';
+import 'package:kover/utils/reflow_engine.dart';
 import 'package:kover/utils/headless_measure_pipeline.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -39,7 +39,6 @@ sealed class EpubReflowState with _$EpubReflowState {
     @Default(null) String? scrollId,
     @Default(null) int? resumeSubpage,
     @Default([]) List<DocumentFragment> subpages,
-    @Default(0.0) double progress,
   }) = _EpubReflowState;
 }
 
@@ -54,7 +53,7 @@ class EpubReflow extends _$EpubReflow {
   bool _measuring = false;
   late EpubMeasureWidgetBuilder _measureBuilder;
   late Duration _maxChunkDuration;
-  late ElementCursor _cursor;
+  late ReflowEngine _cursor;
 
   @override
   Future<EpubReflowState> build({
@@ -107,7 +106,7 @@ class EpubReflow extends _$EpubReflow {
       await loader.load();
     }
 
-    _cursor = ElementCursor(root: pageContent.root.children.first);
+    _cursor = BinaryReflowEngine(root: pageContent.root.children.first);
 
     return EpubReflowState(
       page: pageContent,
@@ -191,6 +190,7 @@ class EpubReflow extends _$EpubReflow {
             await Future<void>.delayed(0.ms);
           }
         }
+        if (!ref.mounted) return;
       }
     } on MeasureTreeBuildException catch (e, stacktrace) {
       log.error(
@@ -211,7 +211,7 @@ class EpubReflow extends _$EpubReflow {
     if (current == null || current.status == .done) return;
 
     final next = _cursor.addNext();
-    if (next != null) return;
+    if (next) return;
 
     final tail = DocumentFragment()..append(_cursor.buffer.clone(true));
     final newSubpages = [
@@ -227,7 +227,6 @@ class EpubReflow extends _$EpubReflow {
     var newState = current.copyWith(
       subpages: newSubpages,
       status: .done,
-      progress: 1.0,
     );
 
     newState = await _checkResumePoint(
@@ -243,7 +242,7 @@ class EpubReflow extends _$EpubReflow {
     final current = state.value;
     if (current == null || current.status == .done) return;
 
-    if (_cursor.splitChild()) return;
+    if (_cursor.overflow()) return;
 
     final newSubpageNode = _cursor.commitSplit();
 
@@ -253,13 +252,8 @@ class EpubReflow extends _$EpubReflow {
       if (fragment.hasVisibleNodes) fragment,
     ];
 
-    final cursorProgress = _cursor.progress;
-
     var newState = current.copyWith(
       subpages: newSubpages,
-      progress: cursorProgress > current.progress
-          ? cursorProgress
-          : current.progress,
     );
 
     newState = await _checkResumePoint(
