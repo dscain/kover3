@@ -91,6 +91,17 @@ class _CredentialsForm extends HookConsumerWidget {
           leadingIcon: KoverIcons.header,
           bottomSheetBuilder: ((context) => const CustomHeadersSheet()),
         ),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: Text(l.ignoreCertificateValidation),
+          subtitle: Text(l.ignoreCertificateValidationDescription),
+          value: data.ignoreCertificateValidation,
+          onChanged: loginStatus == .loading
+              ? null
+              : (value) => ref
+                    .read(credentialsProvider.notifier)
+                    .updateIgnoreCertificateValidation(value),
+        ),
         Row(
           crossAxisAlignment: .center,
           mainAxisAlignment: .spaceBetween,
@@ -130,6 +141,21 @@ class _User extends ConsumerWidget {
       LoginStatus.loading => const SizedBox.square(
         dimension: LayoutConstants.mediumIcon,
         child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+      LoginStatus.certificateError => Row(
+        spacing: LayoutConstants.smallPadding,
+        children: [
+          Icon(
+            LucideIcons.shieldAlert,
+            color: Theme.of(context).colorScheme.error,
+          ),
+          Text(
+            l.certificateRejected,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+        ],
       ),
       LoginStatus.error => Row(
         spacing: LayoutConstants.smallPadding,
