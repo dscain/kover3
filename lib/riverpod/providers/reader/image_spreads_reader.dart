@@ -1,8 +1,17 @@
+import 'dart:ui' as ui;
+
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
+import 'package:kover/pages/reader/image_reader/image_measure_root.dart';
+import 'package:kover/riverpod/providers/book.dart';
 import 'package:kover/riverpod/providers/reader/reader.dart';
 import 'package:kover/riverpod/providers/reader/reader_navigation.dart';
 import 'package:kover/riverpod/providers/settings/common_reader_settings.dart';
 import 'package:kover/riverpod/providers/settings/image_reader_settings.dart';
+import 'package:kover/utils/headless_measure_pipeline.dart';
+import 'package:kover/utils/logging.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'image_spreads_reader.freezed.dart';
@@ -18,11 +27,17 @@ sealed class SpreadsState with _$SpreadsState {
 
 @riverpod
 class Spreads extends _$Spreads {
+  final _pipeline = HeadlessMeasurePipeline();
+
+  bool _checking = false;
+
   @override
   Future<SpreadsState> build({
     required int seriesId,
     required int chapterId,
   }) async {
+    ref.onDispose(_pipeline.dispose);
+
     final reader = await ref.read(
       readerProvider(
         seriesId: seriesId,
@@ -42,6 +57,112 @@ class Spreads extends _$Spreads {
     ];
 
     return SpreadsState(spreads: spreads, checkedPages: {});
+  }
+
+  /// Check all pages before the current page for landscape orientation. This
+  /// is safe to call repeatedly.
+  Future<void> checkLandscapePages({
+    required Size viewport,
+    required double devicePixelRatio,
+    required double refreshRate,
+  }) async {
+    if (viewport.isEmpty) return;
+
+    final targetPage = (await ref.read(
+      readerNavigationProvider(
+        seriesId: seriesId,
+        chapterId: chapterId,
+      ).future,
+    )).currentPage;
+
+    if (_checking) return;
+    _checking = true;
+
+    try {
+      final current = await future;
+      final missingPages = List.generate(targetPage, (index) => index).where((
+        page,
+      ) {
+        return !current.checkedPages.contains(page);
+      });
+
+      if (missingPages.isEmpty) return;
+
+      _pipeline.attach(
+        size: viewport,
+        devicePixelRatio: devicePixelRatio,
+      );
+
+      final stopwatch = Stopwatch()..start();
+      final maxChunkDuration = Duration(
+        milliseconds: (1000 / refreshRate).round(),
+      );
+
+      for (final page in missingPages) {
+        if (!ref.mounted) return;
+
+        if (!current.checkedPages.contains(page)) {
+          try {
+            await _checkPage(page);
+          } catch (e, stacktrace) {
+            log.error(
+              'failed to check page',
+              error: e,
+              stacktrace: stacktrace,
+              attributes: {'page': page},
+            );
+          }
+        }
+
+        // Yield to the event loop periodically to keep the UI responsive.
+        if (stopwatch.elapsed >= maxChunkDuration) {
+          stopwatch.reset();
+          if (SchedulerBinding.instance.hasScheduledFrame) {
+            await SchedulerBinding.instance.endOfFrame;
+          } else {
+            await Future<void>.delayed(0.ms);
+          }
+        }
+      }
+    } on MeasureTreeBuildException catch (e, stacktrace) {
+      log.error(
+        'measure widget failed to build',
+        error: e,
+        stacktrace: stacktrace,
+      );
+    } finally {
+      _checking = false;
+    }
+  }
+
+  Future<void> _checkPage(int page) async {
+    final image = await ref.read(
+      imagePageProvider(chapterId: chapterId, page: page).future,
+    );
+
+    final codec = await ui.instantiateImageCodec(image.data);
+    final frame = await codec.getNextFrame();
+    try {
+      if (!_pipeline.isAttached) {
+        log.warning(
+          'pipeline detached during checking',
+          attributes: {'page': page},
+        );
+        return;
+      }
+
+      final size = _pipeline.measure(
+        ImageMeasureRoot(image: frame.image, horizontalPadding: 0),
+      );
+
+      await markRendered(page);
+      if (size.width > size.height) {
+        await markLandscape(page);
+      }
+    } finally {
+      frame.image.dispose();
+      codec.dispose();
+    }
   }
 
   /// Mark a page as landscape, putting it in its own spread respread the remainder pages
