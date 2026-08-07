@@ -8,6 +8,7 @@ import 'package:kover/pages/reader/epub_reader/epub_theme_override.dart';
 import 'package:kover/pages/reader/overlay/reader_overlay.dart';
 import 'package:kover/riverpod/providers/reader/epub_reader.dart';
 import 'package:kover/riverpod/providers/settings/common_reader_settings.dart';
+import 'package:kover/riverpod/providers/settings/epub_reader_settings.dart';
 import 'package:kover/riverpod/providers/theme.dart' hide Theme;
 import 'package:kover/utils/cached_image_factory.dart';
 import 'package:kover/utils/layout_constants.dart';
@@ -37,6 +38,12 @@ class EpubReader extends HookConsumerWidget {
       commonReaderSettingsProvider(seriesId: seriesId),
     );
 
+    final readerMode = ref.watch(
+      epubReaderSettingsProvider(seriesId: seriesId).select(
+        (state) => state.whenData((data) => data.mode),
+      ),
+    );
+
     final reduceAnimations = ref.watch(
       themeProvider.select(
         (value) =>
@@ -47,9 +54,10 @@ class EpubReader extends HookConsumerWidget {
       ),
     );
 
-    return Async(
-      asyncValue: commonSettings,
-      data: (commonSettings) => ReaderOverlay(
+    return Async2(
+      asyncValue1: commonSettings,
+      asyncValue2: readerMode,
+      data: (commonSettings, readerMode) => ReaderOverlay(
         seriesId: seriesId,
         chapterId: chapterId,
         readingListId: readingListId,
@@ -108,45 +116,57 @@ class EpubReader extends HookConsumerWidget {
                   });
                 });
 
-                return Stack(
-                  children: [
-                    Positioned.fill(
-                      child: Offstage(
-                        offstage: !navState.ready,
-                        child: PageView.builder(
-                          controller: controller,
-                          itemCount: navState.totalPages,
-                          allowImplicitScrolling: true,
-                          reverse: commonSettings.readDirection == .rightToLeft,
-                          physics: const NeverScrollableScrollPhysics(),
-                          onPageChanged: (newPage) {
-                            ref.read(nav.notifier).jumpToPage(newPage);
-                          },
-                          itemBuilder: (context, index) {
-                            return _Page(
-                              seriesId: seriesId,
-                              chapterId: chapterId,
-                              page: index,
-                              reverse:
-                                  commonSettings.readDirection == .rightToLeft,
-                              outerController: controller,
-                              onSelectionChanged: (selected) {
-                                if (selected != hasSelection.value) {
-                                  hasSelection.value = selected;
-                                }
-                              },
-                            );
-                          },
+                return SafeArea(
+                  bottom: false,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: Offstage(
+                          offstage: !navState.ready,
+                          child: PageView.builder(
+                            clipBehavior: .none,
+                            controller: controller,
+                            itemCount: navState.totalPages,
+                            allowImplicitScrolling: true,
+                            scrollCacheExtent: const .viewport(4),
+                            scrollDirection: switch (readerMode) {
+                              .horizontal => .horizontal,
+                              .vertical => .vertical,
+                            },
+                            reverse:
+                                commonSettings.readDirection == .rightToLeft &&
+                                readerMode == .horizontal,
+                            physics: const NeverScrollableScrollPhysics(),
+                            onPageChanged: (newPage) {
+                              ref.read(nav.notifier).jumpToPage(newPage);
+                            },
+                            itemBuilder: (context, index) {
+                              return _Page(
+                                seriesId: seriesId,
+                                chapterId: chapterId,
+                                page: index,
+                                reverse:
+                                    commonSettings.readDirection ==
+                                        .rightToLeft &&
+                                    readerMode == .horizontal,
+                                vertical: readerMode == .vertical,
+                                outerController: controller,
+                                onSelectionChanged: (selected) {
+                                  if (selected != hasSelection.value) {
+                                    hasSelection.value = selected;
+                                  }
+                                },
+                              );
+                            },
+                          ),
                         ),
                       ),
-                    ),
-                    if (!navState.ready)
-                      const Positioned.fill(
-                        child: Center(
+                      if (!navState.ready)
+                        const Center(
                           child: CircularProgressIndicator(),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 );
               },
             ),
@@ -162,6 +182,7 @@ class _Page extends HookConsumerWidget {
   final int chapterId;
   final int page;
   final bool reverse;
+  final bool vertical;
   final PageController outerController;
   final void Function(bool)? onSelectionChanged;
 
@@ -170,6 +191,7 @@ class _Page extends HookConsumerWidget {
     required this.chapterId,
     required this.page,
     this.reverse = false,
+    this.vertical = false,
     this.onSelectionChanged,
     required this.outerController,
   });
@@ -210,8 +232,10 @@ class _Page extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final imageCache = useMemoized(() => CachedImageFactory(), []);
-
+    final imageCache = useMemoized(
+      () => CachedImageFactory(maxHeight: MediaQuery.of(context).size.height),
+      [],
+    );
     final provider = epubReflowProvider(
       seriesId: seriesId,
       chapterId: chapterId,
@@ -266,6 +290,7 @@ class _Page extends HookConsumerWidget {
                     html: html,
                     styles: styles,
                     imageCache: imageCache,
+                    verticalPadding: !vertical,
                   ),
                   refreshRate: View.of(context).display.refreshRate,
                 );
@@ -328,51 +353,55 @@ class _Page extends HookConsumerWidget {
                   },
                 );
 
-                return NotificationListener<ScrollNotification>(
-                  onNotification: navigationGestures
-                      ? handleScrollNotification
-                      : null,
-                  child: PageView.builder(
-                    controller: controller,
-                    allowImplicitScrolling: true,
-                    pageSnapping: true,
-                    reverse: reverse,
-                    itemCount: count,
-                    physics: scrollPhysics,
-                    onPageChanged: (newPage) {
-                      if (navigationState.page != page) return;
+                return SelectionArea(
+                  onSelectionChanged: (selection) {
+                    onSelectionChanged?.call(
+                      selection != null && selection.plainText.isNotEmpty,
+                    );
+                  },
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: navigationGestures
+                        ? handleScrollNotification
+                        : null,
+                    child: PageView.builder(
+                      controller: controller,
+                      allowImplicitScrolling: true,
+                      scrollCacheExtent: const .viewport(4),
+                      scrollDirection: vertical ? .vertical : .horizontal,
+                      pageSnapping: !vertical,
+                      clipBehavior: .none,
+                      reverse: reverse,
+                      itemCount: count,
+                      physics: scrollPhysics,
+                      onPageChanged: (newPage) {
+                        if (navigationState.page != page) return;
 
-                      ref
-                          .read(navigationProvider.notifier)
-                          .jumpToSubpage(
-                            newPage,
-                            fromObserver: true,
-                          );
-                    },
-                    itemBuilder: (context, index) {
-                      if (index >= reflowState.subpages.length) {
-                        return const Center(
-                          child: CircularProgressIndicator(),
-                        );
-                      }
-
-                      return SingleChildScrollView(
-                        child: SelectionArea(
-                          onSelectionChanged: (selection) {
-                            onSelectionChanged?.call(
-                              selection != null &&
-                                  selection.plainText.isNotEmpty,
+                        ref
+                            .read(navigationProvider.notifier)
+                            .jumpToSubpage(
+                              newPage,
+                              fromObserver: true,
                             );
-                          },
+                      },
+                      itemBuilder: (context, index) {
+                        if (index >= reflowState.subpages.length) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+
+                        return OverflowBox(
+                          maxHeight: double.infinity,
                           child: RenderEpubContent(
                             seriesId: seriesId,
                             html: reflowState.subpages[index].outerHtml,
                             styles: reflowState.page.styles,
                             imageCache: imageCache,
+                            verticalPadding: !vertical,
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
                 );
               },
