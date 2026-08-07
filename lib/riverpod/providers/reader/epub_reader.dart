@@ -106,7 +106,7 @@ class EpubReflow extends _$EpubReflow {
       await loader.load();
     }
 
-    final settings = await ref.watch(
+    final settings = await ref.read(
       epubReaderSettingsProvider(seriesId: seriesId).future,
     );
 
@@ -332,6 +332,8 @@ class EpubNavigation extends _$EpubNavigation {
   var _fromLastSubpage = false;
   var _resumed = false;
   var _wasAheadReflow = false;
+  var _spreads = false;
+  int get _step => _spreads ? 2 : 1;
 
   @override
   Future<EpubNavigationState> build({
@@ -340,6 +342,18 @@ class EpubNavigation extends _$EpubNavigation {
   }) async {
     final reader = await ref.read(
       readerProvider(seriesId: seriesId, chapterId: chapterId).future,
+    );
+
+    ref.listen(
+      epubReaderSettingsProvider(
+        seriesId: seriesId,
+      ).select((state) => state.whenData((data) => data.mode)),
+      (prev, next) {
+        next.whenData((mode) {
+          _spreads = mode == .spreads;
+        });
+      },
+      fireImmediately: true,
     );
 
     _handleNavigationProviderChanges();
@@ -407,9 +421,13 @@ class EpubNavigation extends _$EpubNavigation {
 
         final scrollId = reflow.subpages[data.subpage].paragraphScrollId();
 
+        final isLastSubpage = _spreads
+            ? data.subpage >= data.totalSubpages - 2
+            : data.subpage >= data.totalSubpages - 1;
+
         if (reflow.status == .done &&
             data.page >= data.totalPages - 1 &&
-            data.subpage >= data.totalSubpages - 1) {
+            isLastSubpage) {
           await ref
               .read(
                 readerProvider(
@@ -498,6 +516,17 @@ class EpubNavigation extends _$EpubNavigation {
       (prev, next) {
         next.whenData((data) async {
           final current = await future;
+
+          if (data.status == .measuring && prev?.value?.status == .done) {
+            state = AsyncData(
+              current.copyWith(
+                subpage: 0,
+                totalSubpages: data.subpages.length,
+                ready: false,
+              ),
+            );
+            return;
+          }
 
           if (_fromLastSubpage) {
             if (data.status == .done) {
@@ -590,11 +619,11 @@ class EpubNavigation extends _$EpubNavigation {
 
   Future<void> nextPage() async {
     final current = await future;
-    await jumpToSubpage(current.subpage + 1);
+    await jumpToSubpage(current.subpage + _step);
   }
 
   Future<void> previousPage() async {
     final current = await future;
-    await jumpToSubpage(current.subpage - 1);
+    await jumpToSubpage(current.subpage - _step);
   }
 }
