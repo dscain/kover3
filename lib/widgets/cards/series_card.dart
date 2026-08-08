@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:kover/pages/home/on_deck_scope.dart';
 import 'package:kover/riverpod/managers/download_manager.dart';
 import 'package:kover/riverpod/providers/download.dart';
 import 'package:kover/riverpod/providers/reader.dart';
 import 'package:kover/riverpod/providers/router.dart';
 import 'package:kover/riverpod/providers/series.dart';
 import 'package:kover/riverpod/providers/want_to_read.dart';
+import 'package:kover/riverpod/repository/series_repository.dart';
 import 'package:kover/utils/layout_constants.dart';
 import 'package:kover/widgets/cards/cover_card.dart';
 import 'package:kover/widgets/cards/cover_image.dart';
@@ -15,12 +17,12 @@ import 'package:kover/widgets/util/async_value.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 class SeriesCard extends HookConsumerWidget {
+  final int seriesId;
+
   const SeriesCard({
     super.key,
     required this.seriesId,
   });
-
-  final int seriesId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -57,6 +59,13 @@ class SeriesCard extends HookConsumerWidget {
         onRemoveWantToRead: isWantToRead
             ? () async {
                 await ref.read(wantToRead.notifier).remove();
+              }
+            : null,
+        onRemoveOnDeck: OnDeckScope.of(context)
+            ? () async {
+                await ref
+                    .read(seriesRepositoryProvider)
+                    .removeFromOnDeck(seriesId: seriesId);
               }
             : null,
         onDownload: downloadProgress < 1.0
