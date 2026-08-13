@@ -1,10 +1,11 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:kover/pages/reader/epub_reader/epub_horizontal_subpages.dart';
 import 'package:kover/pages/reader/epub_reader/epub_measure_root.dart';
 import 'package:kover/pages/reader/epub_reader/epub_toc_drawer.dart';
-import 'package:kover/pages/reader/epub_reader/render_epub_content.dart';
 import 'package:kover/pages/reader/epub_reader/epub_theme_override.dart';
+import 'package:kover/pages/reader/epub_reader/epub_vertical_subpages.dart';
 import 'package:kover/pages/reader/overlay/reader_overlay.dart';
 import 'package:kover/riverpod/providers/reader/epub_reader.dart';
 import 'package:kover/riverpod/providers/settings/common_reader_settings.dart';
@@ -250,212 +251,81 @@ class _Page extends HookConsumerWidget {
       chapterId: chapterId,
       page: page,
     );
-    final reflow = ref.watch(provider);
-    final navigationProvider = epubNavigationProvider(
-      seriesId: seriesId,
-      chapterId: chapterId,
-    );
-    final navigation = ref.watch(navigationProvider);
 
-    final navigationGestures = ref.watch(
-      commonReaderSettingsProvider(
+    final subpageState = ref.watch(
+      epubReaderSubpageProvider(
         seriesId: seriesId,
-      ).select(
-        (value) => value.whenData((data) => data.navigationGersturesEnabled),
+        chapterId: chapterId,
+        page: page,
       ),
     );
 
-    final readDirection = ref.watch(
-      commonReaderSettingsProvider(
-        seriesId: seriesId,
-      ).select(
-        (value) => value.requireValue.readDirection,
-      ),
-    );
+    return Async(
+      asyncValue: subpageState,
+      skipLoadingOnReload: true,
+      data: (data) {
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isVisiblePage = data.navigation.page == page;
+            final visibleReady = data.navigation.ready;
+            final shouldStart = isVisiblePage || visibleReady;
 
-    final reduceAnimations = ref.watch(
-      themeProvider.select(
-        (value) =>
-            value.whenOrNull(
-              data: (data) => data.reduceAnimations,
-            ) ??
-            const ThemeModel().reduceAnimations,
-      ),
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isVisiblePage = navigation.value?.page == page;
-        final visibleReady = navigation.value?.ready ?? false;
-        final shouldStart = isVisiblePage || visibleReady;
-
-        if (shouldStart && reflow.value?.status != .done) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!context.mounted) return;
-            ref
-                .read(provider.notifier)
-                .startReflow(
-                  viewport: spreads
-                      ? Size(
-                          constraints.maxWidth / 2,
-                          constraints.maxHeight,
-                        )
-                      : constraints.biggest,
-                  devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
-                  measureBuilder: (html, styles) => EpubMeasureRoot(
-                    container: container,
-                    mediaQueryData: mediaQueryData,
-                    themeData: themeData,
-                    textDirection: textDirection,
-                    locale: locale,
-                    seriesId: seriesId,
-                    html: html,
-                    styles: styles,
-                    imageCache: imageCache,
-                    verticalPadding: !vertical,
-                  ),
-                  refreshRate: View.of(context).display.refreshRate,
-                );
-          });
-        }
-
-        return Async3(
-          asyncValue1: navigation,
-          asyncValue2: reflow,
-          asyncValue3: navigationGestures,
-          data: (navigationState, reflowState, navigationGestures) {
-            // include buffer spinner page if currently measuring.
-            final count = reflowState.status == .measuring
-                ? reflowState.subpages.length + 1
-                : reflowState.subpages.length;
-            final spreadCount = (count + 1) ~/ 2;
-
-            return HookConsumer(
-              builder: (context, ref, child) {
-                final controller = usePageController(
-                  initialPage: spreads
-                      ? navigationState.subpage ~/ 2
-                      : navigationState.subpage,
-                );
-                final bool canScroll =
-                    navigationGestures &&
-                    (!reduceAnimations || mode == .vertical);
-                final scrollPhysics = canScroll
-                    ? const AlwaysScrollableScrollPhysics(
-                        parent: ClampingScrollPhysics(),
-                      )
-                    : const NeverScrollableScrollPhysics();
-
-                ref.listen(
-                  navigationProvider.select(
-                    (state) => state.whenData(
-                      (data) {
-                        if (data.page != page || data.fromObserver) return null;
-
-                        return spreads ? data.subpage ~/ 2 : data.subpage;
-                      },
-                    ),
-                  ),
-                  (previous, next) async {
-                    next.whenData((next) async {
-                      final previousSubpage = previous?.value;
-                      if (next == null || next == previousSubpage) {
-                        return;
-                      }
-
-                      if (controller.hasClients &&
-                          controller.page?.round() != next) {
-                        final isSequential =
-                            previousSubpage != null &&
-                            (next - previousSubpage).abs() == 1;
-
-                        isSequential && !reduceAnimations
-                            ? controller.animateToPage(
-                                next,
-                                duration: LayoutConstants.pageSlideDuration,
-                                curve: Curves.easeInOut,
-                              )
-                            : controller.jumpToPage(next);
-                      }
-                    });
-                  },
-                );
-
-                Widget buildColumn(int index) {
-                  if (index >= reflowState.subpages.length) {
-                    if (reflowState.status == .measuring &&
-                        index == reflowState.subpages.length) {
-                      return const Center(
-                        child: CircularProgressIndicator(),
-                      );
-                    }
-
-                    return const SizedBox.shrink();
-                  }
-
-                  return OverflowBox(
-                    maxHeight: double.infinity,
-                    alignment: .topCenter,
-                    child: RenderEpubContent(
-                      seriesId: seriesId,
-                      html: reflowState.subpages[index].outerHtml,
-                      styles: reflowState.page.styles,
-                      imageCache: imageCache,
-                      verticalPadding: !vertical,
-                    ),
-                  );
-                }
-
-                return SelectionArea(
-                  onSelectionChanged: (selection) {
-                    onSelectionChanged?.call(
-                      selection != null && selection.plainText.isNotEmpty,
+            if (shouldStart && data.reflow.status != .done) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!context.mounted) return;
+                ref
+                    .read(provider.notifier)
+                    .startReflow(
+                      viewport: spreads
+                          ? Size(
+                              constraints.maxWidth / 2,
+                              constraints.maxHeight,
+                            )
+                          : constraints.biggest,
+                      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+                      measureBuilder: (html, styles) => EpubMeasureRoot(
+                        container: container,
+                        mediaQueryData: mediaQueryData,
+                        themeData: themeData,
+                        textDirection: textDirection,
+                        locale: locale,
+                        seriesId: seriesId,
+                        html: html,
+                        styles: styles,
+                        imageCache: imageCache,
+                        verticalPadding: !vertical,
+                      ),
+                      refreshRate: View.of(context).display.refreshRate,
                     );
-                  },
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: navigationGestures
-                        ? handleScrollNotification
-                        : null,
-                    child: PageView.builder(
-                      controller: controller,
-                      allowImplicitScrolling: true,
-                      scrollCacheExtent: const .viewport(4),
-                      scrollDirection: vertical ? .vertical : .horizontal,
-                      pageSnapping: !vertical,
-                      clipBehavior: .none,
-                      reverse: reverse,
-                      itemCount: spreads ? spreadCount : count,
-                      physics: scrollPhysics,
-                      onPageChanged: (newPage) {
-                        if (navigationState.page != page) return;
+              });
+            }
 
-                        ref
-                            .read(navigationProvider.notifier)
-                            .jumpToSubpage(
-                              spreads ? newPage * 2 : newPage,
-                              fromObserver: true,
-                            );
-                      },
-                      itemBuilder: (context, index) {
-                        if (!spreads) {
-                          return buildColumn(index);
-                        }
-
-                        return Row(
-                          textDirection: switch (readDirection) {
-                            .leftToRight => .ltr,
-                            .rightToLeft => .rtl,
-                          },
-                          children: [
-                            Expanded(child: buildColumn(index * 2)),
-                            Expanded(child: buildColumn(index * 2 + 1)),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
+            return SelectionArea(
+              onSelectionChanged: (selection) {
+                onSelectionChanged?.call(
+                  selection != null && selection.plainText.isNotEmpty,
                 );
               },
+              child: NotificationListener<ScrollNotification>(
+                onNotification: data.navigationGesturesEnabled
+                    ? handleScrollNotification
+                    : null,
+                child: vertical
+                    ? EpubVerticalSubpages(
+                        key: ValueKey(page),
+                        seriesId: seriesId,
+                        chapterId: chapterId,
+                        page: page,
+                        imageCache: imageCache,
+                      )
+                    : EpubHorizontalSubpages(
+                        key: ValueKey(page),
+                        seriesId: seriesId,
+                        chapterId: chapterId,
+                        page: page,
+                        imageCache: imageCache,
+                      ),
+              ),
             );
           },
         );
