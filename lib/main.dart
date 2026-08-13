@@ -53,6 +53,12 @@ class App extends ConsumerWidget {
             localizationsDelegates: AppLocalizations.localizationsDelegates,
             supportedLocales: AppLocalizations.supportedLocales,
             locale: locale,
+            builder: (context, child) {
+              // TODO: Remove once dependencies are updated to the standalone UI packages.
+              // Known incompatibilities: context_menu does not apply theme.
+              // ignore: deprecated_member_use
+              return MaterialUiCompatibilityBridge(child: child!);
+            },
           ),
           loading: () => const SizedBox.shrink(),
         ),
