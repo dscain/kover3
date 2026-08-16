@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import 'package:kover/database/app_database.dart';
+import 'package:kover/database/dao/chapters_dao.dart';
 import 'package:kover/database/tables/chapters.dart';
 import 'package:kover/database/tables/libraries.dart';
 import 'package:kover/database/tables/progress.dart';
@@ -21,8 +22,8 @@ part 'volumes_dao.g.dart';
 class VolumesDao extends DatabaseAccessor<AppDatabase> with _$VolumesDaoMixin {
   VolumesDao(super.attachedDatabase);
 
-  /// Get a [SingleSelectable] for volume [volumeId]
-  SingleSelectable<VolumeWithRelations> volume(int volumeId) {
+  /// Get a [SingleOrNullSelectable] for volume [volumeId] with its chapters
+  SingleOrNullSelectable<VolumeWithRelations> volume(int volumeId) {
     return managers.volumes
         .withReferences(
           (prefetch) => prefetch(chaptersRefs: true),
@@ -115,12 +116,7 @@ class VolumeWithRelations {
   const VolumeWithRelations({required this.volume, required this.chapters});
 }
 
-class VolumeWithChaptersCompanion {
-  final VolumesCompanion volume;
-  final Iterable<ChaptersCompanion> chapters;
-
-  const VolumeWithChaptersCompanion({
-    required this.volume,
-    this.chapters = const [],
-  });
-}
+class const VolumeWithChaptersCompanion({
+  required final VolumesCompanion volume,
+  required final Iterable<ChapterWithRelationsCompanion> chapters,
+});

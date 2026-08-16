@@ -8,6 +8,7 @@ import 'package:kover/sync/chapter_sync_operations.dart';
 import 'package:kover/utils/chunked_fetch.dart';
 import 'package:kover/utils/logging.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:rxdart/rxdart.dart';
 
 part 'chapters_repository.g.dart';
 
@@ -36,8 +37,27 @@ class ChaptersRepository {
   }) {
     return _db.chaptersDao
         .chapter(chapterId)
-        .watchSingle()
+        .watchSingleOrNull()
+        .whereNotNull()
         .map(ChapterModel.fromDatabaseModel);
+  }
+
+  /// Watch [chapterId] combined with its relations (tags, genres, people)
+  Stream<ChapterModel> watchChapterWithMetadata({
+    required int chapterId,
+  }) {
+    final chapter = _db.chaptersDao
+        .chapter(chapterId)
+        .watchSingleOrNull()
+        .whereNotNull();
+    final relations = _db.chaptersDao.watchChapterRelations(chapterId);
+
+    return Rx.combineLatest2(chapter, relations, (c, r) {
+      return ChapterModel.fromRelations(
+        ChapterModel.fromDatabaseModel(c),
+        r,
+      );
+    });
   }
 
   /// Search chapters by [query]. Optionally filter by [volumeId] and/or [seriesId]

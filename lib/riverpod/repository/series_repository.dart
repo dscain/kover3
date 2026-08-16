@@ -111,6 +111,7 @@ class SeriesRepository {
   Stream<SeriesModel> watchSeriesForChapter(int chapterId) {
     return _db.seriesDao
         .watchSeriesForChapter(chapterId)
+        .whereNotNull()
         .map(SeriesModel.fromDatabaseModel);
   }
 
@@ -257,23 +258,28 @@ class SeriesRepository {
   Future<void> fetchMissingMetadata() async {
     final series = await _db.seriesMetadataDao.getMissingSeriesIds();
 
-    final metadata = <SeriesMetadataCompanions>[];
-    for (final id in series) {
-      try {
-        metadata.add(await _client.getSeriesMetadata(id));
-      } catch (e) {
-        log.warning(
-          'failed to fetch series metadata for series',
-          attributes: {
-            'series_id': id,
-            'error_type': e.runtimeType,
-            'error_message': e,
-          },
-        );
-      }
-    }
-
-    await _db.seriesMetadataDao.upsertMetadataBatch(metadata);
+    await chunkedFetch(
+      items: series,
+      fetchCallback: (item) async {
+        try {
+          return await _client.getSeriesMetadata(item);
+        } catch (e) {
+          log.warning(
+            'failed to fetch series metadata for series',
+            attributes: {
+              'series_id': item,
+              'error_type': e.runtimeType,
+              'error_message': e,
+            },
+          );
+          return null;
+        }
+      },
+      upsertCallback: (batch) async {
+        final metadata = batch.whereType<SeriesMetadataCompanions>().toList();
+        await _db.seriesMetadataDao.upsertMetadataBatch(metadata);
+      },
+    );
   }
 
   Future<void> refreshMetadataAndDetails({required int seriesId}) async {
@@ -462,7 +468,7 @@ class SeriesRepository {
     final chapters = details.volumes.expand((v) => v.chapters).toList();
     chapters.addAll(details.chapters);
     chapters.addAll(details.storyline);
-    final chapterIds = chapters.map((c) => c.id.value).toSet();
+    final chapterIds = chapters.map((c) => c.chapter.id.value).toSet();
     await chunkedFetch(
       items: chapterIds,
       fetchCallback: (id) => _chapterClient.getChapterCover(id),
