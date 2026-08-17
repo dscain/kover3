@@ -108,10 +108,10 @@ class CurrentUser extends _$CurrentUser {
         pluginName: 'kover',
       );
       if (!res.isSuccessful || res.body == null) {
-        if (isCertificateValidationError(res.error)) {
-          throw CertificateValidationException(res.error!);
-        }
-        throw Exception('Failed to authenticate: ${res.error}');
+        throw switch (res.error) {
+          final Exception error => error,
+          final error => Exception('Failed to authenticate: $error'),
+        };
       }
       return UserModel.fromUserDto(res.body!);
     } catch (error) {
