@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:kover/generated/l10n/app_localizations.dart';
 import 'package:kover/riverpod/providers/local_log.dart';
@@ -50,9 +50,18 @@ class App extends ConsumerWidget {
             darkTheme: theme.darkTheme,
             themeMode: theme.mode.toThemeMode(),
             routerConfig: ref.watch(routerProvider),
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            localizationsDelegates: const [
+              ...AppLocalizations.localizationsDelegates,
+              ...GlobalMaterialLocalizations.delegates,
+            ],
             supportedLocales: AppLocalizations.supportedLocales,
             locale: locale,
+            builder: (context, child) {
+              // TODO: Remove once dependencies are updated to the standalone UI packages.
+              // Known incompatibilities: context_menu does not apply theme.
+              // ignore: deprecated_member_use
+              return MaterialUiCompatibilityBridge(child: child!);
+            },
           ),
           loading: () => const SizedBox.shrink(),
         ),

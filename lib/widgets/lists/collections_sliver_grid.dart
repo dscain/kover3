@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:kover/models/collection_model.dart';
 import 'package:kover/widgets/cards/collection_card.dart';
 import 'package:kover/widgets/lists/adaptive_sliver_grid.dart';
@@ -17,7 +17,10 @@ class CollectionsSliverGrid extends StatelessWidget {
       itemCount: collections.length,
       builder: (context, index) {
         final collection = collections[index];
-        return CollectionCard(collectionId: collection.id);
+        return CollectionCard(
+          key: ValueKey(collection.id),
+          collectionId: collection.id,
+        );
       },
     );
   }

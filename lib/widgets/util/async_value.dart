@@ -1,22 +1,16 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:kover/utils/logging.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-class Async<T> extends StatelessWidget {
-  final AsyncValue<T> asyncValue;
-  final Widget Function(T) data;
-  final Widget Function()? loading;
-  final Widget Function(Object, StackTrace)? error;
-
-  const Async({
-    super.key,
-    required this.asyncValue,
-    required this.data,
-    this.loading,
-    this.error,
-  });
-
+class const Async<T>({
+  super.key,
+  required final AsyncValue<T> asyncValue,
+  required final Widget Function(T) data,
+  final Widget Function()? loading,
+  final Widget Function(Object, StackTrace)? error,
+  final bool skipLoadingOnReload = true,
+}) extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return asyncValue.when(
@@ -29,6 +23,7 @@ class Async<T> extends StatelessWidget {
             error: error,
             stacktrace: stack,
           ),
+      skipLoadingOnReload: skipLoadingOnReload,
     );
   }
 }
@@ -193,18 +188,21 @@ class AsyncSliver<T> extends StatelessWidget {
   final Widget Function(T) data;
   final Widget Function()? loading;
   final Widget Function(Object, StackTrace)? error;
+  final bool skipLoadingOnReload;
 
-  const AsyncSliver({
+  const new({
     super.key,
     required this.asyncValue,
     required this.data,
     this.loading,
     this.error,
+    this.skipLoadingOnReload = true,
   });
 
   @override
   Widget build(BuildContext context) {
     return asyncValue.when(
+      skipLoadingOnReload: skipLoadingOnReload,
       data: data,
       loading:
           loading ??

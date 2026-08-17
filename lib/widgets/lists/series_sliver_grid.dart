@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:kover/models/series_model.dart';
 import 'package:kover/widgets/cards/series_card.dart';
 import 'package:kover/widgets/lists/adaptive_sliver_grid.dart';
@@ -23,7 +23,7 @@ class SeriesSliverGrid extends StatelessWidget {
       onCrossAxisCountChanged: onCrossAxisCountChanged,
       builder: (context, index) {
         final series = this.series[index];
-        return SeriesCard(seriesId: series.id);
+        return SeriesCard(key: ValueKey(series.id), seriesId: series.id);
       },
     );
   }

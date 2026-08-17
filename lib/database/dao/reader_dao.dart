@@ -1,10 +1,12 @@
 import 'package:drift/drift.dart';
 import 'package:kover/database/app_database.dart';
 import 'package:kover/database/tables/chapters.dart';
+import 'package:kover/database/tables/on_deck_removal.dart';
 import 'package:kover/database/tables/progress.dart';
 import 'package:kover/database/tables/reading_lists.dart';
 import 'package:kover/database/tables/series.dart';
 import 'package:kover/database/tables/volumes.dart';
+import 'package:rxdart/rxdart.dart';
 
 part 'reader_dao.g.dart';
 
@@ -15,6 +17,7 @@ part 'reader_dao.g.dart';
     Chapters,
     ReadingProgress,
     ReadingListsChapters,
+    OnDeckRemoval,
   ],
 )
 class ReaderDao extends DatabaseAccessor<AppDatabase> with _$ReaderDaoMixin {
@@ -101,15 +104,17 @@ class ReaderDao extends DatabaseAccessor<AppDatabase> with _$ReaderDaoMixin {
   }
 
   /// Stream of continue point for volume [volumeId]
-  Stream<Chapter> watchVolumeContinuePoint({required int volumeId}) async* {
-    final volume = await managers.volumes
+  Stream<Chapter> watchVolumeContinuePoint({required int volumeId}) {
+    return managers.volumes
         .filter((f) => f.id(volumeId))
-        .getSingle();
-
-    yield* _continuePointQuery(
-      seriesId: volume.seriesId,
-      volumeId: volumeId,
-    ).map((row) => row.readTable(chapters)).watchSingle();
+        .watchSingleOrNull()
+        .switchMap((volume) {
+          if (volume == null) return const Stream.empty();
+          return _continuePointQuery(
+            seriesId: volume.seriesId,
+            volumeId: volumeId,
+          ).map((row) => row.readTable(chapters)).watchSingle();
+        });
   }
 
   /// Watch continue point for reading list [readingListId]
@@ -198,12 +203,17 @@ class ReaderDao extends DatabaseAccessor<AppDatabase> with _$ReaderDaoMixin {
   Future<ReadingProgressData> upsertProgress(
     ReadingProgressCompanion entry,
   ) async {
-    return await into(
-      readingProgress,
-    ).insertReturning(
-      entry,
-      onConflict: DoUpdate((old) => entry),
-    );
+    final progress =
+        await into(
+          readingProgress,
+        ).insertReturning(
+          entry,
+          onConflict: DoUpdate((old) => entry),
+        );
+
+    await db.seriesDao.clearOnDeckRemovalForSeries(entry.seriesId.value);
+
+    return progress;
   }
 
   /// Merge a progress batch. Updates all entries that are last modified at the
@@ -230,6 +240,10 @@ class ReaderDao extends DatabaseAccessor<AppDatabase> with _$ReaderDaoMixin {
       await batch((b) {
         b.insertAllOnConflictUpdate(readingProgress, toUpdate);
       });
+
+      await db.seriesDao.clearOnDeckRemovalForSeriesBatch(
+        toUpdate.map((entry) => entry.seriesId.value),
+      );
     }
 
     return await managers.readingProgress

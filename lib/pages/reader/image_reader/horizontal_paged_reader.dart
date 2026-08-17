@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:kover/pages/reader/image_reader/zoomable_horizontal_page_image.dart';
@@ -125,9 +125,14 @@ class HorizontalPagedReader extends HookConsumerWidget {
                       key: ValueKey(index),
                       outerController: pageController,
                       onZoomChanged: (zoomed) {
+                        if (zoomedPageIndexes.value.contains(index) == zoomed) {
+                          return;
+                        }
+
                         final nextZoomedPageIndexes = {
                           ...zoomedPageIndexes.value,
                         };
+
                         zoomed
                             ? nextZoomedPageIndexes.add(index)
                             : nextZoomedPageIndexes.remove(index);

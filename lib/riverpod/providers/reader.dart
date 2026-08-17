@@ -16,7 +16,8 @@ Stream<bool> canReadChapter(Ref ref, int chapterId) {
   final repo = ref.watch(downloadRepositoryProvider);
   return repo
       .watchIsChapterDownloaded(chapterId: chapterId)
-      .map((isDownloaded) => isDownloaded || hasConnection);
+      .map((isDownloaded) => isDownloaded || hasConnection)
+      .distinct();
 }
 
 /// Whether the [seriesId] can be read in the current state.
@@ -26,9 +27,7 @@ Stream<bool> canReadChapter(Ref ref, int chapterId) {
 Stream<bool> canReadSeries(Ref ref, int seriesId) {
   final hasConnection = ref.watch(hasConnectionProvider).value ?? false;
 
-  final chapter = ref
-      .watch(continuePointStreamProvider(seriesId: seriesId))
-      .value;
+  final chapter = ref.watch(continuePointProvider(seriesId: seriesId)).value;
 
   if (chapter == null) return Stream.value(hasConnection);
 
@@ -36,7 +35,8 @@ Stream<bool> canReadSeries(Ref ref, int seriesId) {
 
   return repo
       .watchIsChapterDownloaded(chapterId: chapter.id)
-      .map((isDownloaded) => isDownloaded || hasConnection);
+      .map((isDownloaded) => isDownloaded || hasConnection)
+      .distinct();
 }
 
 /// Whether the [readingListId] can be read in the current state.
@@ -81,17 +81,9 @@ Stream<bool> canReadVolume(Ref ref, int volumeId) {
       .map((isDownloaded) => isDownloaded || hasConnection);
 }
 
-/// Fetch continue point for [seriesId] asynchronously. Guarantees a value
-/// is returned and does not update until manually invalidated or disposed.
+/// Watch continue point for [seriesId].
 @riverpod
-Future<ChapterModel> continuePoint(Ref ref, {required int seriesId}) async {
-  final repo = ref.watch(readerRepositoryProvider);
-  return await repo.getContinuePoint(seriesId: seriesId);
-}
-
-/// Watch continue point for [seriesId], reacting to changes automatically.
-@riverpod
-Stream<ChapterModel> continuePointStream(
+Stream<ChapterModel> continuePoint(
   Ref ref, {
   required int seriesId,
 }) {

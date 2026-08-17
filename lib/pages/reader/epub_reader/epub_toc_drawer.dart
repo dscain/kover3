@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:kover/generated/l10n/app_localizations.dart';
@@ -25,9 +25,13 @@ class EpubTocDrawer extends HookConsumerWidget {
     final hasScrolled = useState(false);
 
     useEffect(() {
-      ref
-          .read(syncManagerProvider.notifier)
-          .refreshChapterToc(chapterId: chapterId);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+
+        ref
+            .read(syncManagerProvider.notifier)
+            .refreshChapterToc(chapterId: chapterId);
+      });
       return null;
     }, []);
 

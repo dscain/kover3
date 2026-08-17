@@ -1,14 +1,18 @@
 import 'package:drift/drift.dart';
 import 'package:kover/database/app_database.dart';
+import 'package:kover/database/dao/chapters_dao.dart';
 import 'package:kover/database/dao/volumes_dao.dart';
 import 'package:kover/database/tables/chapters.dart';
 import 'package:kover/database/tables/libraries.dart';
+import 'package:kover/database/tables/on_deck_removal.dart';
 import 'package:kover/database/tables/progress.dart';
 import 'package:kover/database/tables/series.dart';
 import 'package:kover/database/tables/server_settings.dart';
+import 'package:kover/database/tables/series_metadata.dart';
 import 'package:kover/database/tables/volumes.dart';
 import 'package:kover/database/tables/want_to_read.dart';
 import 'package:kover/utils/data_constants.dart';
+import 'package:kover/utils/extensions/iterable.dart';
 import 'package:rxdart/rxdart.dart';
 
 part 'series_dao.g.dart';
@@ -23,6 +27,13 @@ part 'series_dao.g.dart';
     WantToRead,
     ServerSettings,
     Libraries,
+    OnDeckRemoval,
+    People,
+    Genres,
+    Tags,
+    ChapterPeopleRoles,
+    ChapterGenres,
+    ChapterTags,
   ],
 )
 class SeriesDao extends DatabaseAccessor<AppDatabase> with _$SeriesDaoMixin {
@@ -107,7 +118,8 @@ class SeriesDao extends DatabaseAccessor<AppDatabase> with _$SeriesDaoMixin {
     return await q.get();
   }
 
-  Stream<SeriesData> watchSeriesForChapter(int chapterId) {
+  /// Watch series for chapter [chapterId]. Emits null when the chapter does not exist
+  Stream<SeriesData?> watchSeriesForChapter(int chapterId) {
     return managers.chapters
         .withReferences()
         .filter((f) => f.id(chapterId))
@@ -115,7 +127,7 @@ class SeriesDao extends DatabaseAccessor<AppDatabase> with _$SeriesDaoMixin {
           final (_, refs) = res;
           return await refs.seriesId.getSingle(distinct: true);
         })
-        .watchSingle();
+        .watchSingleOrNull();
   }
 
   /// Get [SingleOrNullSelectable] cover for series [seriesId]
@@ -307,8 +319,6 @@ class SeriesDao extends DatabaseAccessor<AppDatabase> with _$SeriesDaoMixin {
         );
   }
 
-  /// Watch series on deck.
-  ///
   /// A series is on deck when:
   /// - The user has read some pages but not all (partially read)
   /// - AND either:
@@ -316,11 +326,58 @@ class SeriesDao extends DatabaseAccessor<AppDatabase> with _$SeriesDaoMixin {
   ///   - A chapter was added within [ServerSettings.onDeckUpdateDays] days
   ///
   /// Ordered by most recent reading activity, then most recently updated.
-  Stream<List<SeriesData>> watchOnDeck() async* {
+  MultiSelectable<SeriesData> _onDeckQuery({
+    required int progressDays,
+    required int updateDays,
+  }) {
     final totalPagesRead = readingProgress.pagesRead.sum();
     final latestReadDate = readingProgress.lastModified.max();
 
-    yield* managers.serverSettings
+    final cutoffProgress = DateTime.now().subtract(
+      Duration(days: progressDays),
+    );
+    final cutoffLastAdded = DateTime.now().subtract(Duration(days: updateDays));
+
+    final query =
+        select(series).join([
+            innerJoin(
+              readingProgress,
+              readingProgress.seriesId.equalsExp(series.id),
+            ),
+            innerJoin(
+              libraries,
+              libraries.id.equalsExp(series.libraryId),
+            ),
+          ])
+          ..where(
+            libraries.includeInDashboard.equals(true) &
+                notExistsQuery(
+                  select(onDeckRemoval)
+                    ..where((tbl) => tbl.seriesId.equalsExp(series.id)),
+                ),
+          )
+          ..addColumns([totalPagesRead, latestReadDate])
+          ..groupBy(
+            [series.id],
+            having:
+                totalPagesRead.isBiggerThanValue(0) &
+                totalPagesRead.isSmallerThan(series.pages) &
+                (latestReadDate.isBiggerOrEqualValue(cutoffProgress) |
+                    series.lastChapterAdded.isBiggerOrEqualValue(
+                      cutoffLastAdded,
+                    )),
+          )
+          ..orderBy([
+            OrderingTerm.desc(latestReadDate),
+            OrderingTerm.desc(series.lastChapterAdded),
+          ]);
+
+    return query.map((row) => row.readTable(series));
+  }
+
+  /// Watch series on deck.
+  Stream<List<SeriesData>> watchOnDeck() {
+    return managers.serverSettings
         .filter((f) => f.key.equals(DataConstants.serverSettingsKey))
         .watchSingleOrNull()
         .switchMap((setting) {
@@ -329,43 +386,28 @@ class SeriesDao extends DatabaseAccessor<AppDatabase> with _$SeriesDaoMixin {
           final updateDays =
               setting?.onDeckUpdateDays ?? DataConstants.onDeckUpdateDays;
 
-          final cutoffProgress = DateTime.now().subtract(
-            Duration(days: progressDays),
-          );
-          final cutoffLastAdded = DateTime.now().subtract(
-            Duration(days: updateDays),
-          );
-
-          final query =
-              select(series).join([
-                  innerJoin(
-                    readingProgress,
-                    readingProgress.seriesId.equalsExp(series.id),
-                  ),
-                  innerJoin(
-                    libraries,
-                    libraries.id.equalsExp(series.libraryId),
-                  ),
-                ])
-                ..where(libraries.includeInDashboard.equals(true))
-                ..addColumns([totalPagesRead, latestReadDate])
-                ..groupBy(
-                  [series.id],
-                  having:
-                      totalPagesRead.isBiggerThanValue(0) &
-                      totalPagesRead.isSmallerThan(series.pages) &
-                      (latestReadDate.isBiggerOrEqualValue(cutoffProgress) |
-                          series.lastChapterAdded.isBiggerOrEqualValue(
-                            cutoffLastAdded,
-                          )),
-                )
-                ..orderBy([
-                  OrderingTerm.desc(latestReadDate),
-                  OrderingTerm.desc(series.lastChapterAdded),
-                ]);
-
-          return query.map((row) => row.readTable(series)).watch();
+          return _onDeckQuery(
+            progressDays: progressDays,
+            updateDays: updateDays,
+          ).watch();
         });
+  }
+
+  /// Get series on deck.
+  Future<List<SeriesData>> getOnDeck() async {
+    final setting = await managers.serverSettings
+        .filter((f) => f.key.equals(DataConstants.serverSettingsKey))
+        .getSingleOrNull();
+
+    final progressDays =
+        setting?.onDeckProgressDays ?? DataConstants.onDeckProgressDays;
+    final updateDays =
+        setting?.onDeckUpdateDays ?? DataConstants.onDeckUpdateDays;
+
+    return await _onDeckQuery(
+      progressDays: progressDays,
+      updateDays: updateDays,
+    ).get();
   }
 
   /// Watch recently updated series
@@ -445,26 +487,26 @@ class SeriesDao extends DatabaseAccessor<AppDatabase> with _$SeriesDaoMixin {
         .map((v) => v.chapters)
         .expand((cs) => cs);
 
-    final csMap = <int, ChaptersCompanion>{};
+    final csMap = <int, ChapterWithRelationsCompanion>{};
     for (final c in entry.chapters) {
-      csMap[c.id.value] = c;
+      csMap[c.chapter.id.value] = c;
     }
     for (final c in entry.storyline) {
-      final existing = csMap[c.id.value];
-      csMap[c.id.value] = existing != null
-          ? existing.copyWith(isStoryline: c.isStoryline)
+      final existing = csMap[c.chapter.id.value];
+      csMap[c.chapter.id.value] = existing != null
+          ? existing.replace(isStoryline: c.chapter.isStoryline)
           : c;
     }
     for (final c in entry.specials) {
-      final existing = csMap[c.id.value];
-      csMap[c.id.value] = existing != null
-          ? existing.copyWith(isSpecial: c.isSpecial)
+      final existing = csMap[c.chapter.id.value];
+      csMap[c.chapter.id.value] = existing != null
+          ? existing.replace(isSpecial: c.chapter.isSpecial)
           : c;
     }
     for (final c in volumeChapters) {
-      final existing = csMap[c.id.value];
-      csMap[c.id.value] = existing != null
-          ? existing.copyWith(volumeId: c.volumeId)
+      final existing = csMap[c.chapter.id.value];
+      csMap[c.chapter.id.value] = existing != null
+          ? existing.replace(volumeId: c.chapter.volumeId)
           : c;
     }
 
@@ -488,7 +530,55 @@ class SeriesDao extends DatabaseAccessor<AppDatabase> with _$SeriesDaoMixin {
           chapters,
           (t) => t.seriesId.equals(entry.seriesId) & t.id.isNotIn(chapterIds),
         );
-        batch.insertAllOnConflictUpdate(chapters, csMap.values);
+        batch.insertAllOnConflictUpdate(
+          chapters,
+          csMap.values.map((c) => c.chapter),
+        );
+      });
+
+      await batch((batch) {
+        final peopleList = csMap.values.expand(
+          (c) => [
+            ...c.writers,
+            ...c.coverArtists,
+            ...c.publishers,
+            ...c.characters,
+            ...c.pencillers,
+            ...c.inkers,
+            ...c.imprints,
+            ...c.colorists,
+            ...c.letterers,
+            ...c.editors,
+            ...c.translators,
+            ...c.teams,
+            ...c.locations,
+          ],
+        );
+        final genreLinks = csMap.values.expand((c) => c.chapterGenres);
+        final tagLinks = csMap.values.expand((c) => c.chapterTags);
+
+        batch.deleteWhere(
+          chapterPeopleRoles,
+          (t) => t.chapterId.isIn(chapterIds),
+        );
+        batch.deleteWhere(chapterGenres, (t) => t.chapterId.isIn(chapterIds));
+        batch.deleteWhere(chapterTags, (t) => t.chapterId.isIn(chapterIds));
+
+        batch.insertAllOnConflictUpdate(people, peopleList);
+        batch.insertAllOnConflictUpdate(
+          genres,
+          csMap.values.expand((c) => c.genres),
+        );
+        batch.insertAllOnConflictUpdate(
+          tags,
+          csMap.values.expand((c) => c.tags),
+        );
+        batch.insertAllOnConflictUpdate(
+          chapterPeopleRoles,
+          csMap.values.expand((c) => c.chapterPeopleRoles),
+        );
+        batch.insertAllOnConflictUpdate(chapterGenres, genreLinks);
+        batch.insertAllOnConflictUpdate(chapterTags, tagLinks);
       });
 
       await managers.series
@@ -574,9 +664,52 @@ class SeriesDao extends DatabaseAccessor<AppDatabase> with _$SeriesDaoMixin {
     );
   }
 
+  Future<List<OnDeckRemovalData>> getDirtyOnDeckRemovalSeriesIds() async {
+    return await managers.onDeckRemoval.filter((f) => f.dirty(true)).get();
+  }
+
   /// Clear the want to read list
   Future<void> clearWantToRead() async {
     await delete(wantToRead).go();
+  }
+
+  /// Clear dirty flags for OnDeckRemoval entries for series [seriesIds]
+  Future<void> clearDirtyOnDeckRemovalForSeries(Iterable<int> seriesIds) async {
+    await transaction(() async {
+      for (final batch in seriesIds.chunked(100)) {
+        await (update(onDeckRemoval)..where((tbl) => tbl.seriesId.isIn(batch)))
+            .write(const OnDeckRemovalCompanion(dirty: Value(false)));
+      }
+    });
+  }
+
+  /// Remove on deck removal entry for series [seriesId] if present.
+  Future<void> clearOnDeckRemovalForSeries(int seriesId) async {
+    await managers.onDeckRemoval
+        .filter((f) => f.seriesId.id(seriesId))
+        .delete();
+  }
+
+  /// Remove batch from on deck removal table for series [seriesIds] if present
+  /// and clean.
+  Future<void> clearOnDeckRemovalForSeriesBatch(
+    Iterable<int> seriesIds, {
+    bool cleanOnly = true,
+  }) async {
+    final query = delete(onDeckRemoval)
+      ..where((tbl) => tbl.seriesId.isIn(seriesIds));
+
+    if (cleanOnly) {
+      query.where((tbl) => tbl.dirty.equals(false));
+    }
+
+    await query.go();
+  }
+
+  Future<void> upsertOnDeckRemovalBatch(
+    Iterable<OnDeckRemovalCompanion> entries,
+  ) async {
+    await batch((b) => b.insertAllOnConflictUpdate(onDeckRemoval, entries));
   }
 }
 
@@ -598,18 +731,10 @@ class SeriesDetailWithRelations {
   });
 }
 
-class SeriesDetailCompanions {
-  final int seriesId;
-  final Iterable<ChaptersCompanion> storyline;
-  final Iterable<ChaptersCompanion> specials;
-  final Iterable<ChaptersCompanion> chapters;
-  final Iterable<VolumeWithChaptersCompanion> volumes;
-
-  const SeriesDetailCompanions({
-    required this.seriesId,
-    required this.storyline,
-    required this.specials,
-    required this.chapters,
-    required this.volumes,
-  });
-}
+class const SeriesDetailCompanions({
+  required final int seriesId,
+  required final Iterable<ChapterWithRelationsCompanion> storyline,
+  required final Iterable<ChapterWithRelationsCompanion> specials,
+  required final Iterable<ChapterWithRelationsCompanion> chapters,
+  required final Iterable<VolumeWithChaptersCompanion> volumes,
+});

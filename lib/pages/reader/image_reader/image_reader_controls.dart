@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:kover/generated/l10n/app_localizations.dart';
 import 'package:kover/riverpod/providers/breakpoints.dart';
@@ -56,27 +56,22 @@ class ImageReaderSettingsBottomSheet extends ConsumerWidget {
                       ReadDirectionOption(seriesId: seriesId),
                       ChoiceOption<ReaderMode>(
                         title: l.readerMode,
-                        icon: switch (settings.readerMode) {
-                          .horizontal => LucideIcons.moveHorizontal,
-                          .vertical => LucideIcons.moveVertical,
-                          .spread => LucideIcons.columns2,
-                        },
                         options: [
                           ChoiceOptionEntry(
                             value: .horizontal,
                             label: l.horizontal,
-                            icon: LucideIcons.moveHorizontal,
+                            icon: KoverIcons.horizontalReaderMode,
                           ),
                           ChoiceOptionEntry(
                             value: .vertical,
                             label: l.vertical,
-                            icon: LucideIcons.moveVertical,
+                            icon: KoverIcons.verticalReaderMode,
                           ),
                           if (breakpoint != .compact)
                             ChoiceOptionEntry(
                               value: .spread,
                               label: l.twoPage,
-                              icon: LucideIcons.columns2,
+                              icon: KoverIcons.twoPageReaderMode,
                             ),
                         ],
                         value: settings.readerMode,

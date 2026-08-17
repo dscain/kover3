@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 
 /// A single horizontal-reader page: pinch-to-zoom and single-finger pan via
@@ -44,7 +44,10 @@ class ZoomableHorizontalPageImage extends HookWidget {
           controller.value.getMaxScaleOnAxis() > _minScale + 1e-3;
 
       var wasZoomed = isZoomed();
-      onZoomChanged(wasZoomed);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        onZoomChanged(wasZoomed);
+      });
 
       void onChange() {
         final zoomed = isZoomed();

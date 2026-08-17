@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:kover/riverpod/managers/download_manager.dart';
 import 'package:kover/riverpod/providers/chapter.dart';
@@ -10,6 +10,7 @@ import 'package:kover/widgets/cards/cover_image.dart';
 import 'package:kover/widgets/context_menu/actions_menu.dart';
 import 'package:kover/widgets/details/detail_app_bar.dart';
 import 'package:kover/widgets/details/info_widgets.dart';
+import 'package:kover/widgets/details/metadata_sections.dart';
 import 'package:kover/widgets/util/async_value.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -147,13 +148,7 @@ class _ChapterContinuePointButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final canRead =
-        ref
-            .watch(
-              canReadChapterProvider(chapterId),
-            )
-            .value ??
-        false;
+    final canRead = ref.watch(canReadChapterProvider(chapterId)).value ?? false;
 
     return ContinuePointButton(
       enabled: canRead,
@@ -171,7 +166,7 @@ class _ChapterInfo extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final chapter = ref.watch(chapterProvider(chapterId: chapterId));
+    final chapter = ref.watch(chapterMetadataProvider(chapterId: chapterId));
 
     return Async(
       asyncValue: chapter,
@@ -182,7 +177,6 @@ class _ChapterInfo extends ConsumerWidget {
           Wrap(
             spacing: LayoutConstants.mediumPadding,
             runSpacing: LayoutConstants.mediumPadding,
-            alignment: .spaceBetween,
             children: [
               if ((data.wordCount ?? 0) > 0)
                 WordCount(wordCount: data.wordCount!),
@@ -190,8 +184,13 @@ class _ChapterInfo extends ConsumerWidget {
               RemainingHours(
                 hours: data.avgHoursToRead ?? 0,
               ),
+              if (data.releaseYear != null)
+                ReleaseYear(
+                  releaseYear: data.releaseYear!,
+                ),
             ],
           ),
+          MetadataWriters(metadata: data),
         ],
       ),
     );

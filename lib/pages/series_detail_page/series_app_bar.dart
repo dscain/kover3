@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:kover/generated/l10n/app_localizations.dart';
 import 'package:kover/models/series_model.dart';
+import 'package:kover/pages/series_detail_page/series_app_bar_provider.dart';
 import 'package:kover/riverpod/managers/download_manager.dart';
 import 'package:kover/riverpod/managers/sync_manager.dart';
 import 'package:kover/riverpod/providers/download.dart';
@@ -15,6 +15,7 @@ import 'package:kover/widgets/details/detail_app_bar.dart';
 import 'package:kover/widgets/details/info_widgets.dart';
 import 'package:kover/widgets/util/async_value.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:material_ui/material_ui.dart';
 
 class SeriesAppBar extends HookConsumerWidget {
   final int seriesId;
@@ -113,16 +114,16 @@ class _SeriesContinueButtonImage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final continuePoint = ref.watch(continuePointProvider(seriesId: seriesId));
-    final canRead = ref.watch(canReadSeriesProvider(seriesId));
+    final state = ref.watch(
+      seriesAppBarContinueButtonProvider(seriesId: seriesId),
+    );
 
-    return Async2(
-      asyncValue1: continuePoint,
-      asyncValue2: canRead,
-      data: (data, canRead) => ContinueButtonImage(
-        enabled: canRead,
+    return Async(
+      asyncValue: state,
+      data: (data) => ContinueButtonImage(
+        enabled: data.canRead,
         image: ChapterCoverImage(
-          chapterId: data.id,
+          chapterId: data.chapter.id,
           usePlaceholder: false,
         ),
       ),
@@ -157,22 +158,17 @@ class _SeriesContinuePointButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final continuePoint = ref.watch(continuePointProvider(seriesId: seriesId));
-    final progress = ref.watch(
-      continuePointProgressProvider(seriesId: seriesId),
-    );
-    final canRead = ref.watch(
-      canReadSeriesProvider(seriesId),
+    final state = ref.watch(
+      seriesAppBarContinueButtonProvider(seriesId: seriesId),
     );
 
-    return Async2(
-      asyncValue1: continuePoint,
-      asyncValue2: canRead,
-      data: (chapter, canRead) => ContinuePointButton(
-        enabled: canRead,
-        title: chapter.title,
+    return Async(
+      asyncValue: state,
+      data: (data) => ContinuePointButton(
+        enabled: data.canRead,
+        title: data.chapter.title,
         cover: _SeriesContinueButtonImage(seriesId: seriesId),
-        progress: progress.value,
+        progress: data.progress,
         onTap: () => ReaderRoute(seriesId: seriesId).push(context),
       ),
     );
@@ -198,7 +194,6 @@ class _Metadata extends ConsumerWidget {
           Wrap(
             spacing: LayoutConstants.mediumPadding,
             runSpacing: LayoutConstants.mediumPadding,
-            alignment: .spaceBetween,
             children: [
               if ((series.wordCount ?? 0) > 0)
                 WordCount(wordCount: series.wordCount!),
@@ -210,24 +205,26 @@ class _Metadata extends ConsumerWidget {
                 ReleaseYear(
                   releaseYear: metadata.releaseYear!,
                 ),
+              if (metadata.publicationStatus != .unknown)
+                PublicationStatusDisplay(status: metadata.publicationStatus),
             ],
           ),
           Wrap(
             spacing: LayoutConstants.mediumPadding,
             runSpacing: LayoutConstants.mediumPadding,
-            alignment: .spaceBetween,
             children: [
-              LimitedList(
-                title: l.writers,
-                items: metadata.writers
-                    .map(
-                      (w) => Text(
-                        w.name,
-                        style: Theme.of(context).textTheme.labelMedium,
-                      ),
-                    )
-                    .toList(),
-              ),
+              if (metadata.writers.isNotEmpty)
+                LimitedList(
+                  title: l.writers,
+                  items: metadata.writers
+                      .map(
+                        (w) => Text(
+                          w.name,
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                      )
+                      .toList(),
+                ),
             ],
           ),
         ],

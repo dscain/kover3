@@ -7,9 +7,12 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:html/dom.dart';
 import 'package:kover/models/page_content.dart';
 import 'package:kover/riverpod/providers/book.dart';
+import 'package:kover/riverpod/providers/reader.dart';
 import 'package:kover/riverpod/providers/reader//reader.dart';
 import 'package:kover/riverpod/providers/reader/reader_navigation.dart';
+import 'package:kover/riverpod/providers/settings/common_reader_settings.dart';
 import 'package:kover/riverpod/providers/settings/epub_reader_settings.dart';
+import 'package:kover/riverpod/providers/theme.dart';
 import 'package:kover/utils/extensions/document_fragment.dart';
 import 'package:kover/utils/extensions/string.dart';
 import 'package:kover/utils/html_constants.dart';
@@ -21,8 +24,10 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 part 'epub_reader.freezed.dart';
 part 'epub_reader.g.dart';
 
-typedef EpubMeasureWidgetBuilder =
-    Widget Function(String html, Map<String, Map<String, String>> styles);
+typedef EpubMeasureWidgetBuilder = Widget Function(
+  String html,
+  Map<String, Map<String, String>> styles,
+);
 
 enum EpubReflowStatus {
   measuring,
@@ -46,10 +51,6 @@ sealed class EpubReflowState with _$EpubReflowState {
 class EpubReflow extends _$EpubReflow {
   final _pipeline = HeadlessMeasurePipeline();
 
-  // The scroll-id to seek to on resume. Set once from the DB on the very
-  // first build and cleared as soon as we reach a Display state, so that
-  // subsequent page-turn rebuilds never re-trigger a seek.
-  String? _resumeScrollId;
   bool _measuring = false;
   late EpubMeasureWidgetBuilder _measureBuilder;
   late Duration _maxChunkDuration;
@@ -76,25 +77,27 @@ class EpubReflow extends _$EpubReflow {
         ref.invalidateSelf(asReload: true);
       });
     });
-
-    final readerState = await ref.read(
-      readerProvider(
-        seriesId: seriesId,
-        chapterId: chapterId,
-      ).future,
+    final progressFuture = ref.read(
+      bookProgressProvider(chapterId: chapterId).future,
     );
-
-    if (page == readerState.initialPage) {
-      _resumeScrollId = readerState.bookScrollId;
-    }
-
-    if (!ref.mounted) throw StateError('epubReflowProvider disposed');
-    final pageContent = await ref.read(
+    final settingsFuture = ref.read(
+      epubReaderSettingsProvider(seriesId: seriesId).future,
+    );
+    final pageContentFuture = ref.watch(
       epubPageProvider(
         chapterId: chapterId,
         page: page,
       ).future,
     );
+
+    final progress = await progressFuture;
+    final settings = await settingsFuture;
+    final pageContent = await pageContentFuture;
+
+    String? resumeScrollId;
+    if (progress != null && page == progress.pageNum) {
+      resumeScrollId = progress.bookScrollId;
+    }
 
     for (final family in pageContent.fonts.entries) {
       final loader = FontLoader(family.key);
@@ -106,13 +109,9 @@ class EpubReflow extends _$EpubReflow {
       await loader.load();
     }
 
-    final settings = await ref.watch(
-      epubReaderSettingsProvider(seriesId: seriesId).future,
-    );
-
-    if (settings.highlightResumePoint && _resumeScrollId != null) {
+    if (settings.highlightResumePoint && resumeScrollId != null) {
       final resumePoint = pageContent.root.querySelector(
-        '[${HtmlConstants.scrollIdAttribute}="${_resumeScrollId!.cssEscaped}"]',
+        '[${HtmlConstants.scrollIdAttribute}="${resumeScrollId.cssEscaped}"]',
       );
       if (resumePoint != null && resumePoint.hasChildNodes()) {
         resumePoint.classes.add(HtmlConstants.resumeParagraphClass);
@@ -123,7 +122,7 @@ class EpubReflow extends _$EpubReflow {
 
     return EpubReflowState(
       page: pageContent,
-      scrollId: _resumeScrollId,
+      scrollId: resumeScrollId,
     );
   }
 
@@ -140,40 +139,29 @@ class EpubReflow extends _$EpubReflow {
     if (viewport.isEmpty) return;
 
     _measureBuilder = measureBuilder;
-    _maxChunkDuration = Duration(milliseconds: (1000 / refreshRate).round());
+    _maxChunkDuration = Duration(
+      milliseconds: (1000 / refreshRate > 0 ? refreshRate : 30).round(),
+    );
 
     if (_measuring || !state.hasValue) return;
+
     _measuring = true;
     _pipeline.attach(size: viewport, devicePixelRatio: devicePixelRatio);
 
     try {
-      // Ensure the measure widget has its data on first build; the
-      // synchronous loop would otherwise outrun the async resolution.
-      await ref.read(epubReaderSettingsProvider(seriesId: seriesId).future);
-
       if (!ref.mounted) return;
-      await ref.read(customCssProvider(seriesId: seriesId).future);
 
       final stopwatch = Stopwatch()..start();
 
-      while (state.value?.status != .done) {
+      while (ref.mounted &&
+          _pipeline.isAttached &&
+          state.value?.status != .done) {
         final maxHeight = _pipeline.viewportSize?.height ?? viewport.height;
         final bufferHtml = _cursor.buffer.outerHtml;
 
-        if (!_pipeline.isAttached) {
-          log.warning(
-            'pipeline detached during reflow',
-            attributes: {
-              'page': page,
-              'bufferLength': bufferHtml.length,
-            },
-          );
-          return;
-        }
-
-        if (!ref.mounted) return;
-
         final current = await future;
+        if (!ref.mounted || !_pipeline.isAttached) return;
+
         final height = _pipeline
             .measure(_measureBuilder(bufferHtml, current.page.styles))
             .height;
@@ -203,7 +191,6 @@ class EpubReflow extends _$EpubReflow {
             await Future<void>.delayed(0.ms);
           }
         }
-        if (!ref.mounted) return;
       }
     } on MeasureTreeBuildException catch (e, stacktrace) {
       log.error(
@@ -332,6 +319,8 @@ class EpubNavigation extends _$EpubNavigation {
   var _fromLastSubpage = false;
   var _resumed = false;
   var _wasAheadReflow = false;
+  var _spreads = false;
+  int get _step => _spreads ? 2 : 1;
 
   @override
   Future<EpubNavigationState> build({
@@ -342,9 +331,20 @@ class EpubNavigation extends _$EpubNavigation {
       readerProvider(seriesId: seriesId, chapterId: chapterId).future,
     );
 
+    ref.listen(
+      epubReaderSettingsProvider(
+        seriesId: seriesId,
+      ).select((state) => state.whenData((data) => data.mode)),
+      (prev, next) {
+        next.whenData((mode) {
+          _spreads = mode == .spreads;
+        });
+      },
+      fireImmediately: true,
+    );
+
     _handleNavigationProviderChanges();
     _handleProgress();
-    _handleSettingsChanges();
 
     return EpubNavigationState(
       page: reader.initialPage,
@@ -352,37 +352,6 @@ class EpubNavigation extends _$EpubNavigation {
       subpage: 0,
       totalSubpages: 0,
     );
-  }
-
-  void _handleSettingsChanges() {
-    listenSelf((prev, next) {
-      next.whenData((data) {
-        if (prev?.value?.page == data.page) {
-          return;
-        }
-
-        ref.listen(
-          epubReflowProvider(
-            seriesId: seriesId,
-            chapterId: chapterId,
-            page: data.page,
-          ),
-          (prev, next) {
-            next.whenData((next) {
-              if (next.status == .measuring && prev?.value?.status == .done) {
-                state = AsyncData(
-                  data.copyWith(
-                    ready: false,
-                    subpage: 0,
-                    totalSubpages: next.subpages.length,
-                  ),
-                );
-              }
-            });
-          },
-        );
-      });
-    });
   }
 
   void _handleProgress() {
@@ -407,9 +376,13 @@ class EpubNavigation extends _$EpubNavigation {
 
         final scrollId = reflow.subpages[data.subpage].paragraphScrollId();
 
+        final isLastSubpage = _spreads
+            ? data.subpage >= data.totalSubpages - 2
+            : data.subpage >= data.totalSubpages - 1;
+
         if (reflow.status == .done &&
             data.page >= data.totalPages - 1 &&
-            data.subpage >= data.totalSubpages - 1) {
+            isLastSubpage) {
           await ref
               .read(
                 readerProvider(
@@ -496,8 +469,25 @@ class EpubNavigation extends _$EpubNavigation {
         page: page,
       ),
       (prev, next) {
+        if (next.isLoading && prev?.hasValue == true) {
+          _resumed = false;
+          ref.invalidateSelf(asReload: true);
+          return;
+        }
         next.whenData((data) async {
           final current = await future;
+
+          if (data.status == .measuring && prev?.value?.status == .done) {
+            _resumed = false;
+            state = AsyncData(
+              current.copyWith(
+                subpage: 0,
+                totalSubpages: data.subpages.length,
+                ready: false,
+              ),
+            );
+            return;
+          }
 
           if (_fromLastSubpage) {
             if (data.status == .done) {
@@ -590,11 +580,75 @@ class EpubNavigation extends _$EpubNavigation {
 
   Future<void> nextPage() async {
     final current = await future;
-    await jumpToSubpage(current.subpage + 1);
+    await jumpToSubpage(current.subpage + _step);
   }
 
   Future<void> previousPage() async {
     final current = await future;
-    await jumpToSubpage(current.subpage - 1);
+    await jumpToSubpage(current.subpage - _step);
   }
+}
+
+@freezed
+sealed class EpubReaderSubpageState with _$EpubReaderSubpageState {
+  const factory EpubReaderSubpageState({
+    required EpubNavigationState navigation,
+    required EpubReflowState reflow,
+    required EpubReaderMode mode,
+    required double paragraphSpacing,
+    required bool reverse,
+    required bool navigationGesturesEnabled,
+    required bool reduceAnimations,
+  }) = _EpubReaderSubpageState;
+}
+
+@riverpod
+Future<EpubReaderSubpageState> epubReaderSubpage(
+  Ref ref, {
+  required int seriesId,
+  required int chapterId,
+  required int page,
+}) async {
+  final navigationFuture = ref.watch(
+    epubNavigationProvider(
+      seriesId: seriesId,
+      chapterId: chapterId,
+    ).future,
+  );
+  final reflowFuture = ref.watch(
+    epubReflowProvider(
+      seriesId: seriesId,
+      chapterId: chapterId,
+      page: page,
+    ).future,
+  );
+  final epubSettingsFuture = ref.watch(
+    epubReaderSettingsProvider(seriesId: seriesId).selectAsync(
+      (value) => (value.mode, value.paragraphSpacing),
+    ),
+  );
+  final commonSettingsFuture = ref.watch(
+    commonReaderSettingsProvider(seriesId: seriesId).selectAsync(
+      (value) => (value.navigationGersturesEnabled, value.readDirection),
+    ),
+  );
+  final reduceAnimationsFuture = ref.watch(
+    themeProvider.selectAsync((value) => value.reduceAnimations),
+  );
+
+  final reflow = await reflowFuture;
+  final navigation = await navigationFuture;
+  final (mode, paragraphSpacing) = await epubSettingsFuture;
+  final (navigationGestures, readDirection) = await commonSettingsFuture;
+  final reduceAnimations = await reduceAnimationsFuture;
+
+  return EpubReaderSubpageState(
+    navigation: navigation,
+    reflow: reflow,
+    mode: mode,
+    paragraphSpacing: paragraphSpacing,
+    reverse: readDirection == .rightToLeft,
+    navigationGesturesEnabled: navigationGestures,
+    reduceAnimations: reduceAnimations,
+  );
 }

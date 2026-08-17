@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -151,6 +151,7 @@ String _phaseLabel(AppLocalizations l, SyncPhase phase) {
     allSeries: () => l.syncingAllSeries,
     metadata: () => l.syncingMetadata,
     tocs: () => l.syncingTocs,
+    onDeck: () => l.syncingOnDeck,
     recentlyAdded: () => l.syncingRecentlyAdded,
     recentlyUpdated: () => l.syncingRecentlyUpdated,
     libraries: () => l.syncingLibraries,

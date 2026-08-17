@@ -1,14 +1,17 @@
-import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:kover/generated/l10n/app_localizations.dart';
-import 'package:kover/pages/menu_page/app_list_tile.dart';
+import 'package:kover/pages/series_detail_page/carousel_tile.dart';
 import 'package:kover/pages/series_detail_page/series_app_bar.dart';
 import 'package:kover/riverpod/providers/router.dart';
 import 'package:kover/riverpod/providers/series.dart';
+import 'package:kover/utils/extensions/iterable.dart';
 import 'package:kover/utils/layout_constants.dart';
-import 'package:kover/widgets/details/summary.dart';
+import 'package:kover/widgets/cards/chapter_card.dart';
+import 'package:kover/widgets/cards/volume_card.dart';
+import 'package:kover/widgets/details/metadata_sections.dart';
 import 'package:kover/widgets/util/async_value.dart';
 import 'package:kover/widgets/util/sliver_bottom_padding.dart';
+import 'package:material_ui/material_ui.dart';
 
 class SeriesDetailPage extends HookConsumerWidget {
   final int seriesId;
@@ -19,67 +22,130 @@ class SeriesDetailPage extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppLocalizations.of(context);
     final details = ref.watch(seriesDetailProvider(seriesId: seriesId));
-    final summary = ref.watch(
-      seriesMetadataProvider(seriesId: seriesId).select(
-        (value) => value.asData?.value.summary,
-      ),
-    );
 
     return Scaffold(
       body: Async(
         asyncValue: details,
         data: (detailsData) {
           return CustomScrollView(
-            slivers: [
-              SeriesAppBar(seriesId: seriesId),
-              SliverPadding(
-                padding: const EdgeInsetsGeometry.only(
-                  top: LayoutConstants.mediumPadding,
-                  left: LayoutConstants.mediumPadding,
-                  right: LayoutConstants.mediumPadding,
-                ),
-                sliver: SliverToBoxAdapter(
-                  child: Column(
-                    spacing: LayoutConstants.smallPadding,
-                    crossAxisAlignment: .start,
-                    children: [
-                      if (detailsData.specials.isNotEmpty)
-                        AppListTile(
-                          title:
-                              '${l.specials} (${detailsData.specials.length})',
-                          onTap: () => SpecialsRoute(seriesId: seriesId).push(
-                            context,
+            slivers:
+                [
+                      SeriesAppBar(seriesId: seriesId),
+                      SliverPadding(
+                        padding: const EdgeInsetsGeometry.only(
+                          top: LayoutConstants.mediumPadding,
+                          left: LayoutConstants.mediumPadding,
+                          right: LayoutConstants.mediumPadding,
+                        ),
+                        sliver: SliverToBoxAdapter(
+                          child: Column(
+                            spacing: LayoutConstants.smallPadding,
+                            crossAxisAlignment: .start,
+                            children: [
+                              if (detailsData.specials.isNotEmpty)
+                                CarouselTile(
+                                  title:
+                                      '${l.specials} (${detailsData.specials.length})',
+                                  onTap: () => SpecialsRoute(
+                                    seriesId: seriesId,
+                                  ).push(context),
+                                  listItemCount: detailsData.specials.length,
+                                  listItemBuilder: (context, index) {
+                                    final special = detailsData.specials[index];
+                                    return AspectRatio(
+                                      aspectRatio: LayoutConstants
+                                          .chapterCardAspectRatio,
+                                      child: ChapterCard(
+                                        seriesId: seriesId,
+                                        chapterId: special.id,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              if (detailsData.storyline.isNotEmpty)
+                                CarouselTile(
+                                  title:
+                                      '${l.storyline} (${detailsData.storyline.length})',
+                                  onTap: () => StorylineRoute(
+                                    seriesId: seriesId,
+                                  ).push(context),
+                                  listItemCount: detailsData.storyline.length,
+                                  listItemBuilder: (context, index) {
+                                    final storyline =
+                                        detailsData.storyline[index];
+                                    return AspectRatio(
+                                      aspectRatio: LayoutConstants
+                                          .chapterCardAspectRatio,
+                                      child: ChapterCard(
+                                        seriesId: seriesId,
+                                        chapterId: storyline.id,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              if (detailsData.volumes.isNotEmpty)
+                                CarouselTile(
+                                  title:
+                                      '${l.volumes} (${detailsData.volumes.length})',
+                                  onTap: () => VolumesRoute(
+                                    seriesId: seriesId,
+                                  ).push(context),
+                                  listItemCount: detailsData.volumes.length,
+                                  listItemBuilder: (context, index) {
+                                    final volume = detailsData.volumes[index];
+                                    return AspectRatio(
+                                      aspectRatio: LayoutConstants
+                                          .chapterCardAspectRatio,
+                                      child: VolumeCard(
+                                        volumeId: volume.id,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              if (detailsData.chapters.isNotEmpty)
+                                CarouselTile(
+                                  title:
+                                      '${l.chapters} (${detailsData.chapters.length})',
+                                  onTap: () => ChaptersRoute(
+                                    seriesId: seriesId,
+                                  ).push(context),
+                                  listItemCount: detailsData.chapters.length,
+                                  listItemBuilder: (context, index) {
+                                    final chapter = detailsData.chapters[index];
+                                    return AspectRatio(
+                                      aspectRatio: LayoutConstants
+                                          .chapterCardAspectRatio,
+                                      child: ChapterCard(
+                                        seriesId: seriesId,
+                                        chapterId: chapter.id,
+                                      ),
+                                    );
+                                  },
+                                ),
+                            ],
                           ),
                         ),
-                      if (detailsData.storyline.isNotEmpty)
-                        AppListTile(
-                          title:
-                              '${l.storyline} (${detailsData.storyline.length})',
-                          onTap: () => StorylineRoute(
-                            seriesId: seriesId,
-                          ).push(context),
+                      ),
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: LayoutConstants.mediumPadding,
                         ),
-                      if (detailsData.volumes.isNotEmpty)
-                        AppListTile(
-                          title: '${l.volumes} (${detailsData.volumes.length})',
-                          onTap: () =>
-                              VolumesRoute(seriesId: seriesId).push(context),
+                        sliver: SliverToBoxAdapter(
+                          child: MetadataSections(
+                            asyncValue: ref.watch(
+                              seriesMetadataProvider(seriesId: seriesId),
+                            ),
+                          ),
                         ),
-                      if (detailsData.chapters.isNotEmpty)
-                        AppListTile(
-                          title:
-                              '${l.chapters} (${detailsData.chapters.length})',
-                          onTap: () =>
-                              ChaptersRoute(seriesId: seriesId).push(context),
-                        ),
-                      Summary(summary: summary),
-                      _Genres(seriesId: seriesId),
-                    ],
-                  ),
-                ),
-              ),
-              const SliverBottomPadding(),
-            ],
+                      ),
+                      const SliverBottomPadding(),
+                    ]
+                    .interleave(
+                      const SliverToBoxAdapter(
+                        child: SizedBox(height: LayoutConstants.mediumPadding),
+                      ),
+                    )
+                    .toList(),
           );
         },
         loading: () => CustomScrollView(
@@ -92,51 +158,6 @@ class SeriesDetailPage extends HookConsumerWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _Genres extends ConsumerWidget {
-  final int seriesId;
-  const _Genres({
-    required this.seriesId,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l = AppLocalizations.of(context);
-    final metadata = ref.watch(seriesMetadataProvider(seriesId: seriesId));
-    final theme = Theme.of(context);
-    return Async(
-      asyncValue: metadata,
-      data: (metadata) => Column(
-        crossAxisAlignment: .start,
-        spacing: LayoutConstants.smallPadding,
-        children: [
-          Text(
-            l.genres,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          Wrap(
-            spacing: LayoutConstants.mediumPadding,
-            runSpacing: LayoutConstants.mediumPadding,
-            alignment: .start,
-            children: metadata.genres
-                .map(
-                  (g) => Chip(
-                    backgroundColor: theme.colorScheme.tertiaryContainer,
-                    label: Text(
-                      g.name,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onTertiaryContainer,
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-        ],
       ),
     );
   }

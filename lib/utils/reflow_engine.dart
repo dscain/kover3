@@ -1,4 +1,5 @@
 import 'package:html/dom.dart';
+import 'package:kover/utils/extensions/document_fragment.dart';
 import 'package:kover/utils/html_constants.dart';
 
 abstract class ReflowEngine {
@@ -139,6 +140,7 @@ class BinaryReflowEngine implements ReflowEngine {
     if (frame.p > frame.lo && frame.target.nodes.isNotEmpty) {
       frame.target.nodes.removeLast();
     }
+
     frame.pending.removeRange(0, frame.lo);
 
     // Drop whitespace at the start of the next page.
@@ -155,6 +157,24 @@ class BinaryReflowEngine implements ReflowEngine {
     }
 
     final result = _buffer.clone(true);
+
+    // Remove empty paragraph shells.
+    result
+        .querySelectorAll('p')
+        .where((p) => !p.hasVisibleNodes)
+        .forEach((p) => p.remove());
+
+    // Mark a trailing split paragraph so the renderer can omit its bottom
+    // margin: the split halves should read as one paragraph.
+    final hasSplitParagraph = _frames.any(
+      (f) => f.target.localName == 'p' && f.target.hasVisibleNodes,
+    );
+    if (hasSplitParagraph) {
+      final trailing = result.localName == 'p'
+          ? result
+          : result.querySelectorAll('p').lastOrNull;
+      trailing?.attributes[HtmlConstants.splitParagraphAttribute] = '';
+    }
 
     // Reconstruct a clear tree up to the deepest target.
     Element? parent;

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:kover/generated/l10n/app_localizations.dart';
 import 'package:kover/pages/reader/epub_reader/render_epub_content.dart';
@@ -15,6 +15,7 @@ class EpubMeasureRoot extends StatelessWidget {
   final String html;
   final Map<String, Map<String, String>> styles;
   final CachedImageFactory? imageCache;
+  final bool verticalPadding;
 
   const EpubMeasureRoot({
     super.key,
@@ -27,6 +28,7 @@ class EpubMeasureRoot extends StatelessWidget {
     required this.html,
     required this.styles,
     this.imageCache,
+    this.verticalPadding = true,
   });
 
   @override
@@ -40,6 +42,7 @@ class EpubMeasureRoot extends StatelessWidget {
             styles: styles,
             html: html,
             imageCache: imageCache,
+            verticalPadding: verticalPadding,
           ),
         ),
       ],

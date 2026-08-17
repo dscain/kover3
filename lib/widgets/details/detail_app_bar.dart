@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -187,7 +187,9 @@ class ContinuePointButton extends HookWidget {
                     mainAxisSize: .min,
                     children: [
                       Text(
-                        l.continueReading,
+                        progress != null && progress! > 0
+                            ? l.continueReading
+                            : l.startReading,
                         style: theme.textTheme.titleMedium?.copyWith(
                           color: textColor,
                         ),
