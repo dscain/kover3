@@ -675,12 +675,17 @@
     "@invalidCredentials": {
         "description": "User display error displayed when credentials are invalid"
     },
-    "certificateRejected": "Certificate Rejected",
-    "@certificateRejected": {
+    "invalidCertificate": "Invalid Certificate",
+    "@invalidCertificate": {
         "description": "User display error shown when the server certificate cannot be validated"
     },
+<<<<<<< Updated upstream
     "certificateRejectedDescription": "The server's HTTPS certificate could not be verified. Check the certificate, or enable \"Ignore certificate validation\" in Settings (only if you trust this server).",
     "@certificateRejectedDescription": {
+=======
+    "invalidCertificateDescription": "The server's HTTPS certificate could not be verified. Check the certificate, or enable \"Ignore certificate validation\" in Settings (only if you trust this server).",
+    "@invalidCertificateDescription": {
+>>>>>>> Stashed changes
         "description": "Instructions shown when the server certificate cannot be validated"
     },
     "ignoreCertificateValidation": "Ignore certificate validation",
