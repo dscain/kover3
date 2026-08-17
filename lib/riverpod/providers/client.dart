@@ -1,7 +1,7 @@
 import 'package:chopper/chopper.dart';
 import 'package:kover/api/openapi.swagger.dart';
 import 'package:kover/riverpod/providers/settings/credentials.dart';
-import 'package:kover/utils/http_client.dart';
+import 'package:kover/utils/http_client/http_client.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'client.g.dart';

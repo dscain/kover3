@@ -4,6 +4,7 @@ import 'package:kover/generated/l10n/app_localizations.dart';
 import 'package:kover/riverpod/providers/auth.dart';
 import 'package:kover/riverpod/providers/router.dart';
 import 'package:kover/riverpod/providers/settings/credentials.dart';
+import 'package:kover/utils/constants/kover_icons.dart';
 import 'package:kover/utils/layout_constants.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -63,13 +64,13 @@ class LoginGuard extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                LucideIcons.shieldAlert,
+                KoverIcons.invalidCertificate,
                 size: LayoutConstants.largerIcon,
                 color: Theme.of(context).colorScheme.error,
               ),
               const SizedBox(height: LayoutConstants.smallPadding),
               Text(
-                l.certificateRejected,
+                l.invalidCertificate,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -81,7 +82,7 @@ class LoginGuard extends ConsumerWidget {
                   horizontal: LayoutConstants.mediumPadding,
                 ),
                 child: Text(
-                  l.certificateRejectedDescription,
+                  l.invalidCertificateDescription,
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -89,7 +90,7 @@ class LoginGuard extends ConsumerWidget {
               FilledButton.icon(
                 onPressed: () => const SettingsRoute().go(context),
                 icon: Icon(
-                  LucideIcons.settings,
+                  KoverIcons.settings,
                   size: LayoutConstants.smallIcon,
                   color: Theme.of(context).colorScheme.onPrimary,
                 ),
@@ -144,7 +145,7 @@ class LoginGuard extends ConsumerWidget {
                   FilledButton.icon(
                     onPressed: () => const SettingsRoute().go(context),
                     icon: Icon(
-                      LucideIcons.settings,
+                      KoverIcons.settings,
                       size: LayoutConstants.smallIcon,
                       color: Theme.of(context).colorScheme.onPrimary,
                     ),
