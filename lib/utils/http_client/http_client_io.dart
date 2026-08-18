@@ -10,7 +10,10 @@ http.Client? createHttpClient({
 
   return IOClient(
     HttpClient()
-      ..badCertificateCallback =
-          (X509Certificate certificate, String host, int port) => true,
+      ..badCertificateCallback = (
+        X509Certificate certificate,
+        String host,
+        int port,
+      ) => true,
   );
 }
